@@ -1,6 +1,5 @@
-SUDO = doas
 SHELL = /bin/zsh
-LLVM_VERSION=14.0.4
+LLVM_VERSION = 14.0.4
 TARGET = x86_64-elf
 
 ifndef BUILDENV
@@ -52,7 +51,7 @@ run: run_prep
 	-drive file=out/volume,index=0,media=disk,format=raw \
 	-usb -device usb-mouse -device usb-kbd \
 	-nic none \
-    -monitor stdio 
+	-monitor stdio 
 
 run_debug: run_prep
 	qemu-system-x86_64 \
