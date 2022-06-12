@@ -1,0 +1,5 @@
+[Defines]
+    DEC_SPECIFICATION   = 0x00010005
+    PACKAGE_NAME        = KleeLoaderPkg
+    PACKAGE_GUID        = 24188adb-7df3-4b09-ae1e-1f7cfb192727
+    PACKAGE_VERSION     = 0.1
