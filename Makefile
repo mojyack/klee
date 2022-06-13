@@ -16,7 +16,7 @@ COMMON_FLAGS = ${INCLUDES} -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -
 out:
 	mkdir out
 
-out/loader.efi: out KleeLoaderPkg/main.c
+out/loader.efi: out KleeLoaderPkg/main.c KleeLoaderPkg/memory.c
 	cd edk2; \
 	if [ ! -e KleeLoaderPkg ]; then ln -s ../KleeLoaderPkg .; fi; \
 	if [ ! -e build_rule.txt ]; then ln -s Conf/build_rule.txt .; fi; \
@@ -27,8 +27,8 @@ out/loader.efi: out KleeLoaderPkg/main.c
 	cp edk2/Build/loader-X64/DEBUG_CLANGPDB/X64/loader.efi out
 
 out/kernel.elf: src/main.cpp
-	clang++ -O0 -Wall -g -ffreestanding -fno-exceptions -std=c++20 --target=${TARGET} ${COMMON_FLAGS} -c -o out/main.o $^
-	ld.lld --entry kernel_main -z norelro --image-base 0x100000 --static -L${LIBRARY} -o $@ out/main.o
+	clang++ -O0 -g -Wall -ffreestanding -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 --target=${TARGET} ${COMMON_FLAGS} -c -o out/main.o $^
+	ld.lld --entry kernel_main -z norelro --image-base 0x100000 --static -L${LIBRARY} -lc -o $@ out/main.o
 
 out/volume:
 	scripts/createimage.sh $@

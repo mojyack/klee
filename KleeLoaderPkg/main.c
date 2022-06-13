@@ -1,4 +1,5 @@
 #include <Guid/FileInfo.h>
+#include <Library/BaseMemoryLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/PrintLib.h>
 #include <Library/UefiBootServicesTableLib.h>
@@ -7,7 +8,9 @@
 #include <Protocol/DiskIo2.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/SimpleFileSystem.h>
-#include <Uefi.h>
+
+#include "elf.h"
+#include "memory.h"
 
 struct MemoryMap {
     UINTN  buffer_size;
@@ -146,6 +149,30 @@ const CHAR16* get_pixel_format_string(const EFI_GRAPHICS_PIXEL_FORMAT format) {
     }
 }
 
+void halt(void) {
+    while(1) {
+        __asm__("hlt");
+    }
+}
+
+void assert(const EFI_STATUS status, const CHAR16* message) {
+    if(!EFI_ERROR(status)) {
+        return;
+    }
+    Print(L"%s: %r\n", message, status);
+    while(1) {
+        __asm__("hlt");
+    }
+}
+
+int warn(const EFI_STATUS status, const CHAR16* message) {
+    if(!EFI_ERROR(status)) {
+        return 0;
+    }
+    Print(L"%s: %r\n", message, status);
+    return 1;
+}
+
 #define KERNEL_FILENAME L"\\kernel.elf"
 
 EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_table) {
@@ -154,71 +181,70 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
     // dump memory map
     CHAR8            memmap_buf[4096 * 4];
     struct MemoryMap memmap = {sizeof(memmap_buf), memmap_buf, 0, 0, 0, 0};
-    get_memory_map(&memmap);
+    assert(get_memory_map(&memmap), L"failed to get memory map");
 
     EFI_FILE_PROTOCOL* root_dir;
-    open_rootdir(image_handle, &root_dir);
+    assert(open_rootdir(image_handle, &root_dir), L"failed to open root directory");
 
     EFI_FILE_PROTOCOL* memmap_file;
-    root_dir->Open(root_dir, &memmap_file, L"\\memmap", EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
-    save_memory_map(&memmap, memmap_file);
-    memmap_file->Close(memmap_file);
-
-    // open gop
-    EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
-    open_gop(image_handle, &gop);
-    Print(L"resolution: %ux%u, pixel format: %s, %u pixels/line\n", gop->Mode->Info->HorizontalResolution, gop->Mode->Info->VerticalResolution, get_pixel_format_string(gop->Mode->Info->PixelFormat), gop->Mode->Info->PixelsPerScanLine);
-    Print(L"frame Buffer: 0x%0lx - 0x%0lx, size: %lu bytes\n", gop->Mode->FrameBufferBase, gop->Mode->FrameBufferBase + gop->Mode->FrameBufferSize, gop->Mode->FrameBufferSize);
+    if(!warn(root_dir->Open(root_dir, &memmap_file, L"\\memmap", EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0), L"failed to open \\memmap\n")) {
+        assert(save_memory_map(&memmap, memmap_file), L"failed to save memory map");
+        assert(memmap_file->Close(memmap_file), L"failed to close memory map");
+    } else {
+        Print(L"error ignored\n");
+    }
 
     // load kernel
     EFI_FILE_PROTOCOL* kernel_file;
-    root_dir->Open(root_dir, &kernel_file, KERNEL_FILENAME, EFI_FILE_MODE_READ, 0);
+    assert(root_dir->Open(root_dir, &kernel_file, KERNEL_FILENAME, EFI_FILE_MODE_READ, 0), L"failed to open kernel");
 
     // get kernel file size
     UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(KERNEL_FILENAME);
     UINT8 file_info_buffer[file_info_size];
-    kernel_file->GetInfo(kernel_file, &gEfiFileInfoGuid, &file_info_size, file_info_buffer);
+    assert(kernel_file->GetInfo(kernel_file, &gEfiFileInfoGuid, &file_info_size, file_info_buffer), L"failed to get kernel file informations");
     EFI_FILE_INFO* file_info        = (EFI_FILE_INFO*)file_info_buffer;
     UINTN          kernel_file_size = file_info->FileSize;
 
     // allocate memory and load kernel
-    EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
-    gBS->AllocatePages(AllocateAddress, EfiLoaderData, (kernel_file_size + 0x1000 - 1) / 0x1000, &kernel_base_addr);
-    kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_base_addr);
-    kernel_file->Close(kernel_file);
+    EFI_PHYSICAL_ADDRESS kernel_file_load_addr;
+    assert(allocate(&kernel_file_load_addr, kernel_file_size), L"failed to allocate pages for kernel file");
+    assert(kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_file_load_addr), L"failed to read kernel file");
+    assert(kernel_file->Close(kernel_file), L"failed to close kernel file");
 
-    // calc entry point
-    typedef void    EntryPointType(UINT64, UINT64);
-    UINT64          entry_addr  = *(UINT64*)(kernel_base_addr + 24);
-    EntryPointType* entry_point = (EntryPointType*)entry_addr;
-    Print(L"kernel: 0x%0lx (%lu bytes) kernel_main() at 0x%0lx\n", kernel_base_addr, kernel_file_size, entry_point);
+    // parse elf
+    struct ELF*           elf             = (struct ELF*)(kernel_file_load_addr);
+    struct ProgramHeader* program_headers = (struct ProgramHeader*)(kernel_file_load_addr + elf->program_header_address);
+    for(struct ProgramHeader* program_header = program_headers; program_header < program_headers + elf->program_header_limit; program_header += 1) {
+        if(program_header->type != 0x01) {
+            // not a loadable segment
+            continue;
+        }
+        Print(L"program_header: offset 0x%0lx, address 0x%0lx, filesize 0x%0lx, memsize 0x%0lx\n", program_header->offset, program_header->p_address, program_header->filesize, program_header->memsize);
+        assert(allocate_address(program_header->p_address, program_header->memsize), L"failed to allocate pages for kernel segment");
+        CopyMem((VOID*)program_header->p_address, (VOID*)(kernel_file_load_addr + program_header->offset), program_header->filesize);
+    }
+
+    // open gop
+    EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
+    assert(open_gop(image_handle, &gop), L"failed to open GOP");
+    Print(L"resolution: %ux%u, pixel format: %s, %u pixels/line\n", gop->Mode->Info->HorizontalResolution, gop->Mode->Info->VerticalResolution, get_pixel_format_string(gop->Mode->Info->PixelFormat), gop->Mode->Info->PixelsPerScanLine);
+    Print(L"frame Buffer: 0x%0lx - 0x%0lx, size: %lu bytes\n", gop->Mode->FrameBufferBase, gop->Mode->FrameBufferBase + gop->Mode->FrameBufferSize, gop->Mode->FrameBufferSize);
 
     // exit boot service
-    EFI_STATUS status;
-    status = gBS->ExitBootServices(image_handle, memmap.map_key);
-    if(EFI_ERROR(status)) {
-        status = get_memory_map(&memmap);
-        if(EFI_ERROR(status)) {
-            Print(L"failed to get memory map: %r\n", status);
-            while(1)
-                ;
-        }
-        status = gBS->ExitBootServices(image_handle, memmap.map_key);
-        if(EFI_ERROR(status)) {
-            Print(L"Could not exit boot service: %r\n", status);
-            while(1)
-                ;
-        }
+    if(EFI_ERROR(gBS->ExitBootServices(image_handle, memmap.map_key))) {
+        assert(get_memory_map(&memmap), L"failed to get memory map");
+        assert(gBS->ExitBootServices(image_handle, memmap.map_key), L" could not exit boot service");
     }
 
     // call kernel
-    entry_point(gop->Mode->FrameBufferBase, gop->Mode->FrameBufferSize);
-    while(1) {
-        __asm__("hlt");
-    }
+    typedef __attribute__((sysv_abi)) void EntryPointType(UINT64, UINT64);
+
+    EntryPointType* entry = (EntryPointType*)elf->entry_address;
+    entry(gop->Mode->FrameBufferBase, gop->Mode->FrameBufferSize);
 
     Print(L"done");
     while(1) {
+        __asm__("hlt");
     }
     return EFI_SUCCESS;
 }
