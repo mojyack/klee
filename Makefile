@@ -20,7 +20,7 @@ out/loader.efi: out KleeLoaderPkg/main.c KleeLoaderPkg/memory.c
 	cd edk2; \
 	if [ ! -e KleeLoaderPkg ]; then ln -s ../KleeLoaderPkg .; fi; \
 	if [ ! -e build_rule.txt ]; then ln -s Conf/build_rule.txt .; fi; \
-	echo -e "ACTIVE_PLATFORM = KleeLoaderPkg/loader.dsc\nTARGET = DEBUG\nTARGET_ARCH = X64\nTOOL_CHAIN_TAG = CLANGPDB" > Conf/target.txt \
+	echo -e "ACTIVE_PLATFORM = KleeLoaderPkg/loader.dsc\nTARGET = DEBUG\nTARGET_ARCH = X64\nTOOL_CHAIN_TAG = CLANGPDB" > Conf/target.txt; \
 	$(MAKE) -C BaseTools/Source/C; \
 	source ./edksetup.sh; \
 	build
