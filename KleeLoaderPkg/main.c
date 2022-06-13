@@ -10,6 +10,7 @@
 #include <Protocol/SimpleFileSystem.h>
 
 #include "elf.h"
+#include "framebuffer.h"
 #include "memory.h"
 
 struct MemoryMap {
@@ -230,6 +231,25 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
     Print(L"resolution: %ux%u, pixel format: %s, %u pixels/line\n", gop->Mode->Info->HorizontalResolution, gop->Mode->Info->VerticalResolution, get_pixel_format_string(gop->Mode->Info->PixelFormat), gop->Mode->Info->PixelsPerScanLine);
     Print(L"frame Buffer: 0x%0lx - 0x%0lx, size: %lu bytes\n", gop->Mode->FrameBufferBase, gop->Mode->FrameBufferBase + gop->Mode->FrameBufferSize, gop->Mode->FrameBufferSize);
 
+    struct FramebufferConfig framebuffer_config = {
+        (UINT8*)gop->Mode->FrameBufferBase,
+        gop->Mode->Info->PixelsPerScanLine,
+        gop->Mode->Info->HorizontalResolution,
+        gop->Mode->Info->VerticalResolution,
+        0,
+    };
+    switch(gop->Mode->Info->PixelFormat) {
+    case PixelRedGreenBlueReserved8BitPerColor:
+        framebuffer_config.pixel_format = PixelRGBResv8BitPerColor;
+        break;
+    case PixelBlueGreenRedReserved8BitPerColor:
+        framebuffer_config.pixel_format = PixelBGRResv8BitPerColor;
+        break;
+    default:
+        Print(L"unimplemented pixel format: %d\n", gop->Mode->Info->PixelFormat);
+        halt();
+    }
+
     // exit boot service
     if(EFI_ERROR(gBS->ExitBootServices(image_handle, memmap.map_key))) {
         assert(get_memory_map(&memmap), L"failed to get memory map");
@@ -237,10 +257,10 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
     }
 
     // call kernel
-    typedef __attribute__((sysv_abi)) void EntryPointType(UINT64, UINT64);
+    typedef __attribute__((sysv_abi)) void EntryPointType(struct FramebufferConfig*);
 
     EntryPointType* entry = (EntryPointType*)elf->entry_address;
-    entry(gop->Mode->FrameBufferBase, gop->Mode->FrameBufferSize);
+    entry(&framebuffer_config);
 
     Print(L"done");
     while(1) {
