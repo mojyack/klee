@@ -3,7 +3,7 @@ LLVM_VERSION = 14.0.4
 TARGET = x86_64-elf
 INCLUDES = -I${BUILDENV}/include -I${BUILDENV}/include/freetype2 -I${BUILDENV}/include/c++/v1 -I$(abspath edk2/MdePkg/Include) -I$(abspath edk2/MdePkg/Include/X64)
 COMMON_FLAGS = -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
-CXX = clang++ -O0 -g -Wall -ffreestanding -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 --target=${TARGET} ${INCLUDES} ${COMMON_FLAGS} -c
+CXX = clang++ -O3 -Wall -ffreestanding -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 --target=${TARGET} ${INCLUDES} ${COMMON_FLAGS} -c
 LIBRARY = ${BUILDENV}/lib
 
 ifndef BUILDENV
@@ -13,10 +13,8 @@ endif
 
 .PHONY: all run clean
 
-out:
-	mkdir out
-
-out/loader.efi: out KleeLoaderPkg/main.c KleeLoaderPkg/elf.c KleeLoaderPkg/memory.c
+out/loader.efi: KleeLoaderPkg/main.c KleeLoaderPkg/elf.c KleeLoaderPkg/memory.c
+	mkdir -p out
 	cd edk2; \
 	if [ ! -e KleeLoaderPkg ]; then ln -s ../KleeLoaderPkg .; fi; \
 	if [ ! -e build_rule.txt ]; then ln -s Conf/build_rule.txt .; fi; \
@@ -29,10 +27,11 @@ out/loader.efi: out KleeLoaderPkg/main.c KleeLoaderPkg/elf.c KleeLoaderPkg/memor
 out/stub.o: src/stub.cpp
 	${CXX} -o $@ $<
 
-out/main.o: src/main.cpp src/framebuffer-forward.h src/framebuffer.hpp src/type.hpp
+out/main.o: src/main.cpp src/framebuffer-forward.h src/framebuffer.hpp src/type.hpp src/console.hpp
 	${CXX} -o $@ $<
 
 out/font.o: src/font.txt
+	mkdir -p out
 	python scripts/makefont.py -o out/font.bin $<
 	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 out/font.bin $@
 	objcopy \
@@ -45,6 +44,7 @@ out/kernel.elf: out/main.o out/stub.o out/font.o
 	ld.lld --entry kernel_main -z norelro --image-base 0x100000 --static -L${LIBRARY} -lc -o $@ $^
 
 out/volume:
+	mkdir -p out
 	scripts/createimage.sh $@
 
 run_prep: out/volume out/loader.efi out/kernel.elf ovmf/OVMF.fd
