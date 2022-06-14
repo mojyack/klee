@@ -8,6 +8,7 @@
 
 [Sources]
     main.c
+    elf.c
     memory.c
 
 [Packages]

@@ -16,7 +16,7 @@ COMMON_FLAGS = ${INCLUDES} -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -
 out:
 	mkdir out
 
-out/loader.efi: out KleeLoaderPkg/main.c KleeLoaderPkg/memory.c
+out/loader.efi: out KleeLoaderPkg/main.c KleeLoaderPkg/elf.c KleeLoaderPkg/memory.c
 	cd edk2; \
 	if [ ! -e KleeLoaderPkg ]; then ln -s ../KleeLoaderPkg .; fi; \
 	if [ ! -e build_rule.txt ]; then ln -s Conf/build_rule.txt .; fi; \

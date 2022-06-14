@@ -1,3 +1,4 @@
+#pragma once
 #include <Uefi.h>
 
 struct ELF {
@@ -33,3 +34,5 @@ struct ProgramHeader {
     UINT64 memsize;
     UINT64 align;
 };
+
+EFI_STATUS load_elf(EFI_FILE_PROTOCOL* root, const CHAR16* path, EFI_PHYSICAL_ADDRESS* const entry);

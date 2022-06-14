@@ -174,8 +174,6 @@ int warn(const EFI_STATUS status, const CHAR16* message) {
     return 1;
 }
 
-#define KERNEL_FILENAME L"\\kernel.elf"
-
 EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_table) {
     Print(L"klee loader\n");
 
@@ -193,36 +191,6 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
         assert(memmap_file->Close(memmap_file), L"failed to close memory map");
     } else {
         Print(L"error ignored\n");
-    }
-
-    // load kernel
-    EFI_FILE_PROTOCOL* kernel_file;
-    assert(root_dir->Open(root_dir, &kernel_file, KERNEL_FILENAME, EFI_FILE_MODE_READ, 0), L"failed to open kernel");
-
-    // get kernel file size
-    UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(KERNEL_FILENAME);
-    UINT8 file_info_buffer[file_info_size];
-    assert(kernel_file->GetInfo(kernel_file, &gEfiFileInfoGuid, &file_info_size, file_info_buffer), L"failed to get kernel file informations");
-    EFI_FILE_INFO* file_info        = (EFI_FILE_INFO*)file_info_buffer;
-    UINTN          kernel_file_size = file_info->FileSize;
-
-    // allocate memory and load kernel
-    EFI_PHYSICAL_ADDRESS kernel_file_load_addr;
-    assert(allocate(&kernel_file_load_addr, kernel_file_size), L"failed to allocate pages for kernel file");
-    assert(kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_file_load_addr), L"failed to read kernel file");
-    assert(kernel_file->Close(kernel_file), L"failed to close kernel file");
-
-    // parse elf
-    struct ELF*           elf             = (struct ELF*)(kernel_file_load_addr);
-    struct ProgramHeader* program_headers = (struct ProgramHeader*)(kernel_file_load_addr + elf->program_header_address);
-    for(struct ProgramHeader* program_header = program_headers; program_header < program_headers + elf->program_header_limit; program_header += 1) {
-        if(program_header->type != 0x01) {
-            // not a loadable segment
-            continue;
-        }
-        Print(L"program_header: offset 0x%0lx, address 0x%0lx, filesize 0x%0lx, memsize 0x%0lx\n", program_header->offset, program_header->p_address, program_header->filesize, program_header->memsize);
-        assert(allocate_address(program_header->p_address, program_header->memsize), L"failed to allocate pages for kernel segment");
-        CopyMem((VOID*)program_header->p_address, (VOID*)(kernel_file_load_addr + program_header->offset), program_header->filesize);
     }
 
     // open gop
@@ -250,6 +218,12 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
         halt();
     }
 
+    // load kernel
+    typedef __attribute__((sysv_abi)) void EntryPointType(struct FramebufferConfig*);
+
+    EntryPointType* entry;
+    assert(load_elf(root_dir, L"\\kernel.elf", (EFI_PHYSICAL_ADDRESS*)&entry), L"failed to load kernel.elf");
+
     // exit boot service
     if(EFI_ERROR(gBS->ExitBootServices(image_handle, memmap.map_key))) {
         assert(get_memory_map(&memmap), L"failed to get memory map");
@@ -257,9 +231,6 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
     }
 
     // call kernel
-    typedef __attribute__((sysv_abi)) void EntryPointType(struct FramebufferConfig*);
-
-    EntryPointType* entry = (EntryPointType*)elf->entry_address;
     entry(&framebuffer_config);
 
     Print(L"done");

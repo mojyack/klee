@@ -27,6 +27,13 @@ class Framebuffer {
 
   public:
     auto write_pixel(const Point point, const Color color) -> void;
+    auto write_rect(const Point a, const Point b, const Color color) -> void {
+        for(auto y = a.y; y < b.y; y += 1) {
+            for(auto x = a.x; x < b.x; x += 1) {
+                write_pixel({x, y}, color);
+            }
+        }
+    }
     Framebuffer(const FramebufferConfig& config) : config(config) {}
 };
 
@@ -49,20 +56,10 @@ auto Framebuffer<PixelBGRResv8BitPerColor>::write_pixel(const Point point, const
 auto write_rect(const FramebufferConfig& config, const Point a, const Point b, const Color color) -> void {
     switch(config.pixel_format) {
     case PixelRGBResv8BitPerColor: {
-        auto frame_buffer = Framebuffer<PixelRGBResv8BitPerColor>(config);
-        for(auto y = a.y; y < b.y; y += 1) {
-            for(auto x = a.x; x < b.x; x += 1) {
-                frame_buffer.write_pixel({x, y}, color);
-            }
-        }
+        Framebuffer<PixelRGBResv8BitPerColor>(config).write_rect(a, b, color);
     }
     case PixelBGRResv8BitPerColor: {
-        auto frame_buffer = Framebuffer<PixelBGRResv8BitPerColor>(config);
-        for(auto y = a.y; y < b.y; y += 1) {
-            for(auto x = a.x; x < b.x; x += 1) {
-                frame_buffer.write_pixel({x, y}, color);
-            }
-        }
+        Framebuffer<PixelBGRResv8BitPerColor>(config).write_rect(a, b, color);
     }
     }
 }
