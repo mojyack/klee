@@ -5,7 +5,7 @@ struct Point {
     uint32_t x;
     uint32_t y;
 
-    auto operator+(const Point& o) -> Point {
+    auto operator+(const Point& o) const -> Point {
         return {x + o.x, y + o.y};
     }
 };

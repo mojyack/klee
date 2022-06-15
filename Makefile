@@ -27,7 +27,10 @@ out/loader.efi: KleeLoaderPkg/main.c KleeLoaderPkg/elf.c KleeLoaderPkg/memory.c
 out/stub.o: src/stub.cpp
 	${CXX} -o $@ $<
 
-out/main.o: src/main.cpp src/framebuffer-forward.h src/framebuffer.hpp src/type.hpp src/console.hpp
+out/asmcode.o: src/asmcode.asm src/asmcode.h
+	nasm -f elf64 -o $@ $<
+
+out/main.o: src/main.cpp src/framebuffer-forward.h src/framebuffer.hpp src/type.hpp src/console.hpp src/mousecursor.hpp src/error.hpp src/pci.hpp
 	${CXX} -o $@ $<
 
 out/font.o: src/font.txt
@@ -40,7 +43,7 @@ out/font.o: src/font.txt
 	--redefine-sym _binary_out_font_bin_size=font_limit \
 	$@ $@
 
-out/kernel.elf: out/main.o out/stub.o out/font.o
+out/kernel.elf: out/main.o out/stub.o out/font.o out/asmcode.o
 	ld.lld --entry kernel_main -z norelro --image-base 0x100000 --static -L${LIBRARY} -lc -o $@ $^
 
 out/volume:
