@@ -4,6 +4,10 @@
 struct Point {
     uint32_t x;
     uint32_t y;
+
+    auto operator+(const Point& o) -> Point {
+        return {x + o.x, y + o.y};
+    }
 };
 
 struct RGBColor {
