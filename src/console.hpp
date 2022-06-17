@@ -71,4 +71,4 @@ class Console {
     }
 };
 
-extern Console* console;
+inline auto console = (Console*)(nullptr);

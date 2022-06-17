@@ -251,7 +251,7 @@ struct Device {
         }
 
         const auto table_addr = (table_bar.as_value() & ~static_cast<uint64_t>(0x0F)) + (msix_cap.table.bits.offset << 3);
-        const auto pba_addr   = (pba_bar.as_value() & ~static_cast<uint64_t>(0x0F)) + (msix_cap.pba.bits.offset << 3);
+        // const auto pba_addr   = (pba_bar.as_value() & ~static_cast<uint64_t>(0x0F)) + (msix_cap.pba.bits.offset << 3);
 
         const auto table        = reinterpret_cast<MSIXTable*>(table_addr);
         table[0].msg_addr       = msg_addr;
