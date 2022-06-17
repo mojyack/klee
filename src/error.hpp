@@ -25,6 +25,7 @@ class Error {
         InvalidPhase,
         UnknownXHCISpeedID,
         NoWaiter,
+        NoPCIMSI,
         LastOfCode,
     };
 
@@ -50,6 +51,7 @@ class Error {
         "InvalidPhase",
         "UnknownXHCISpeedID",
         "NoWaiter",
+        "NoPCIMSI",
         "LastOfCode",
     };
 

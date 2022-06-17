@@ -56,7 +56,7 @@ inline auto calc_most_significant_bit(const uint32_t value) -> int {
     }
 
     auto msb_index = int();
-    asm("bsr %1, %0"
+    __asm__("bsr %1, %0"
         : "=r"(msb_index)
         : "m"(value));
     return msb_index;
@@ -473,8 +473,12 @@ class Controller {
         return Error::Code::Success;
     }
 
+    auto has_unprocessed_event() const -> bool {
+        return er.has_front();
+    }
+
     auto process_event() -> Error {
-        if(!er.has_front()) {
+        if(!has_unprocessed_event()) {
             return Error::Code::Success;
         }
 
