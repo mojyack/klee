@@ -30,7 +30,7 @@ out/stub.o: src/stub.cpp
 out/asmcode.o: src/asmcode.asm src/asmcode.h
 	nasm -f elf64 -o $@ $<
 
-out/main.o: src/main.cpp src/framebuffer-forward.h src/framebuffer.hpp src/type.hpp src/console.hpp src/mousecursor.hpp src/error.hpp src/pci.hpp
+out/main.o: src/main.cpp src
 	${CXX} -o $@ $<
 
 out/font.o: src/font.txt
@@ -57,30 +57,34 @@ run_prep: out/volume out/loader.efi out/kernel.elf ovmf/OVMF.fd
 	scripts/copyfiles.sh out/volume out/root
 
 run: run_prep
+	SDL_VIDEODRIVER=wayland \
 	qemu-system-x86_64 \
 	-machine type=q35,accel=kvm \
 	-bios ovmf/OVMF.fd \
 	-cpu host,kvm=off \
-	-display gtk,gl=on \
+	-display sdl,gl=on \
 	-enable-kvm \
 	-m 512M \
 	-boot order=c \
 	-drive file=out/volume,index=0,media=disk,format=raw \
-	-usb -device usb-mouse -device usb-kbd \
+	-device qemu-xhci \
+	-device usb-mouse -device usb-kbd \
 	-nic none \
 	-monitor stdio 
 
 run_debug: run_prep
+	SDL_VIDEODRIVER=wayland \
 	qemu-system-x86_64 \
 	-machine type=q35,accel=kvm \
 	-bios ovmf/OVMF.fd \
 	-cpu host,kvm=off \
-	-display gtk,gl=on \
+	-display sdl,gl=on \
 	-enable-kvm \
 	-m 512M \
 	-boot order=c \
 	-drive file=out/volume,index=0,media=disk,format=raw \
-	-usb -device usb-mouse -device usb-kbd \
+	-device qemu-xhci \
+	-device usb-mouse -device usb-kbd \
 	-nic none \
 	-gdb tcp::8080 -S &
 	lldb out/kernel.elf

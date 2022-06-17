@@ -28,6 +28,19 @@ class Framebuffer {
 
     auto write_pixel(const Point point, const Color auto color) -> void;
 
+    auto write_pixel(const Point point, const uint32_t color) -> void {
+        auto p = reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
+        *p     = color;
+    }
+
+    auto write_pixel(const Point point, const uint8_t color) -> void {
+        write_pixel(point, static_cast<uint32_t>(color | color << 8 | color << 16 | color << 24));
+    }
+
+    auto read_pixel(const Point point, uint32_t& ret) -> auto{
+        ret = *reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
+    }
+
     auto write_rect(const Point a, const Point b, const Color auto color) -> void {
         for(auto y = a.y; y < b.y; y += 1) {
             for(auto x = a.x; x < b.x; x += 1) {
@@ -61,7 +74,7 @@ class Framebuffer {
 
     auto write_string(const Point point, const std::string_view str, const Color auto color) -> void {
         for(auto i = uint32_t(0); i < str.size(); i += 1) {
-            write_ascii({point.x + font_size[0] * i, point.y}, str[i], color);
+            write_ascii(Point(point.x + font_size[0] * i, point.y), str[i], color);
         }
     }
 

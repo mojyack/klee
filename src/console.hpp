@@ -34,7 +34,7 @@ class Console {
         buffer[tail == 0 ? buffer.size() - 1 : tail - 1].len = 0;
 
         const auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
-        FRAMEBUFFER_INVOKE(write_rect, framebuffer_config, {0, 0}, {font_size[0] * columns, font_size[1] * rows}, uint8_t(0x00));
+        FRAMEBUFFER_INVOKE(write_rect, framebuffer_config, {0, 0}, Point(font_size[0] * columns, font_size[1] * rows), uint8_t(0x00));
 
         for(auto i = head, n = uint32_t(0); i != tail; i = (i + 1) % buffer.size(), n += 1) {
             const auto& l = buffer[i];
@@ -44,7 +44,7 @@ class Console {
 
     static auto calc_position(const uint32_t row, const uint32_t column) -> Point {
         constexpr auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
-        return {font_size[0] * column, font_size[1] * row};
+        return Point(font_size[0] * column, font_size[1] * row);
     }
 
   public:

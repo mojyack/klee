@@ -2,12 +2,19 @@
 #include <cstdint>
 
 struct Point {
-    uint32_t x;
-    uint32_t y;
+    int x;
+    int y;
 
     auto operator+(const Point& o) const -> Point {
         return {x + o.x, y + o.y};
     }
+
+    auto operator+=(const Point& o) -> Point& {
+        *this = *this + o;
+        return *this;
+    }
+
+    Point(const int x, const int y) : x(x), y(y) {}
 };
 
 struct RGBColor {
@@ -16,5 +23,5 @@ struct RGBColor {
     char b;
 
     RGBColor(const char r, const char g, const char b) : r(r), g(g), b(b) {}
-    RGBColor(const int32_t color) : r((color >> 16) & 0xFF), g((color >> 8) & 0xFF), b((color >> 0) & 0xFF) {}
+    explicit RGBColor(const int32_t color) : r((color >> 16) & 0xFF), g((color >> 8) & 0xFF), b((color >> 0) & 0xFF) {}
 };
