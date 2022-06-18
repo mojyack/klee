@@ -33,10 +33,10 @@ class Console {
         }
         buffer[tail == 0 ? buffer.size() - 1 : tail - 1].len = 0;
 
-        const auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
+        constexpr auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
         FRAMEBUFFER_INVOKE(write_rect, framebuffer_config, {0, 0}, Point(font_size[0] * columns, font_size[1] * rows), uint8_t(0x00));
 
-        for(auto i = head, n = uint32_t(0); i != tail; i = (i + 1) % buffer.size(), n += 1) {
+        for(auto i = head, n = uint32_t(0); n == 0 || i != tail; i = (i + 1) % buffer.size(), n += 1) {
             const auto& l = buffer[i];
             FRAMEBUFFER_INVOKE(write_string, framebuffer_config, calc_position(n, 0), std::string_view(l.data.data(), l.len), uint8_t(0xFF));
         }
@@ -63,6 +63,22 @@ class Console {
             } else {
                 newline();
             }
+        }
+    }
+
+    auto resize(uint32_t new_rows, uint32_t new_columns) -> void {
+        new_rows    = new_rows <= max_rows ? new_rows : max_rows;
+        new_columns = new_columns <= max_columns ? new_columns : max_columns;
+
+        // TODO: implement correct resizing
+        head    = 0;
+        tail    = 1;
+        row     = 0;
+        column  = 0;
+        rows    = new_rows;
+        columns = new_columns;
+        for(auto& l : buffer) {
+            l.len = 0;
         }
     }
 
