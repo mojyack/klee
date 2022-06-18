@@ -308,10 +308,12 @@ class Controller {
         usbcmd.bits.interrupter_enable       = false;
         usbcmd.bits.host_system_error_enable = false;
         usbcmd.bits.enable_wrap_event        = false;
+        
         // host controller must be halted before resetting it
         if(!op->usbsts.read().bits.host_controller_halted) {
             usbcmd.bits.run_stop = false; // stop
         }
+
 
         op->usbcmd.write(usbcmd);
         while(!op->usbsts.read().bits.host_controller_halted) {

@@ -20,7 +20,7 @@ struct MemoryDescriptor {
 
 #ifdef __cplusplus
 enum class MemoryType {
-    EfiReservedMemoryType,
+    EfiReservedMemoryType = 0,
     EfiLoaderCode,
     EfiLoaderData,
     EfiBootServicesCode,
@@ -51,4 +51,6 @@ inline auto is_available_memory_type(const MemoryType memory_type) -> bool {
            memory_type == MemoryType::EfiBootServicesData ||
            memory_type == MemoryType::EfiConventionalMemory;
 }
+
+inline auto uefi_page_size = 4096;
 #endif

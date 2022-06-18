@@ -7,9 +7,11 @@
 #include "log.hpp"
 #include "memory-map.h"
 #include "mousecursor.hpp"
+#include "paging.hpp"
 #include "pci.hpp"
 #include "print.hpp"
 #include "queue.hpp"
+#include "segment.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 
@@ -21,8 +23,8 @@ class Kernel {
   private:
     static inline Kernel* kernel;
 
-    const MemoryMap&         memory_map;
-    const FramebufferConfig& framebuffer_config;
+    MemoryMap         memory_map;
+    FramebufferConfig framebuffer_config;
 
     Console     console;
     MouseCursor mousecursor;
@@ -63,42 +65,48 @@ class Kernel {
 
   public:
     auto run() -> void {
+        // set global objects
         kernel    = this;
         ::console = &console;
 
+        // resize console
         constexpr auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
         console.resize(framebuffer_config.vertical_resolution / font_size[1], framebuffer_config.horizontal_resolution / font_size[0]);
         logger(LogLevel::Debug, "klee\n");
 
-        constexpr auto available_memory_types = std::array{
-            MemoryType::EfiBootServicesCode,
-            MemoryType::EfiBootServicesData,
-            MemoryType::EfiConventionalMemory,
-        };
+        //// setup segments
+        setup_segments();
+        set_dsall(0);
+        set_csss(1 << 3, 2 << 3);
+        setup_identity_page_table();
 
+        // print memory map
         printk("memory_map: %p\n", &memory_map);
         for(auto iter = reinterpret_cast<uintptr_t>(memory_map.buffer); iter < reinterpret_cast<uintptr_t>(memory_map.buffer) + memory_map.map_size; iter += memory_map.descriptor_size) {
             const auto& desc = *reinterpret_cast<MemoryDescriptor*>(iter);
-            for(const auto type : available_memory_types) {
-                if(desc.type != type) {
-                    continue;
-                }
-                const auto pages = desc.number_of_pages;
-                const auto begin = desc.physical_start;
-                const auto end   = begin + pages * 4096;
-                const auto attr  = desc.attribute;
-                printk("type = %u, phys = [%08lx - %08lx), pages = %lu, attr = %08lx\n", type, begin, end, pages, attr);
+            const auto  type = static_cast<MemoryType>(desc.type);
+            if(!is_available_memory_type(type)) {
+                continue;
             }
+            const auto pages = desc.number_of_pages;
+            const auto begin = desc.physical_start;
+            const auto end   = begin + pages * 4096;
+            const auto attr  = desc.attribute;
+            printk("type = %u, phys = [%08lx - %08lx), pages = %lu, attr = %08lx\n", type, begin, end, pages, attr);
         }
 
+        // setup idt
         const auto cs = read_cs();
         set_idt_entry(idt[InterruptVector::Number::XHCI], make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(int_hander_xhci), cs);
         load_idt(sizeof(idt) - 1, reinterpret_cast<uintptr_t>(&idt[0]));
 
+        // scan pci devices
         auto       pci              = pci::Devices();
         const auto error            = pci.scan_all_bus();
         const auto& [size, devices] = pci.get_devices();
-        auto xhc_dev                = (const pci::Device*)(nullptr);
+
+        // find xhc device
+        auto xhc_dev = (const pci::Device*)(nullptr);
         for(auto i = size_t(0); i < size; i += 1) {
             const auto& dev       = devices[i];
             const auto  vendor_id = pci::read_vender_id(dev.bus, dev.device, dev.function);
@@ -114,6 +122,7 @@ class Kernel {
         const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
         xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, InterruptVector::Number::XHCI, 0);
 
+        // find mmio address of xhc device
         const auto xhc_bar = xhc_dev->read_bar(0);
         if(xhc_dev != nullptr) {
             if(xhc_bar) {
@@ -139,6 +148,7 @@ class Kernel {
         logger(LogLevel::Debug, "xhc initialize: %s\n", xhc.initialize().to_str());
         xhc.run();
 
+        // connect usb devices
         usb::HIDMouseDriver::default_observer = [this](int8_t displacement_x, int8_t displacement_y) -> void {
             mouse_observer(displacement_x, displacement_y);
         };
@@ -181,8 +191,10 @@ class Kernel {
                                                                                        mousecursor(framebuffer_config) {}
 };
 
-extern "C" void kernel_main(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) {
-    Kernel(memory_map, framebuffer_config).run();
+alignas(16) uint8_t kernel_main_stack[1024 * 1024];
+
+extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferConfig& framebuffer_config_ref) {
+    Kernel(memory_map_ref, framebuffer_config_ref).run();
     while(1) {
         __asm__("hlt");
     }

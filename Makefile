@@ -44,7 +44,7 @@ out/font.o: src/font.txt
 	$@ $@
 
 out/kernel.elf: out/main.o out/stub.o out/font.o out/asmcode.o
-	ld.lld --entry kernel_main -z norelro --image-base 0x100000 --static -L${LIBRARY} -lc -o $@ $^
+	ld.lld --entry kernel_entry -z norelro --image-base 0x100000 --static -L${LIBRARY} -lc -o $@ $^
 
 out/volume:
 	mkdir -p out
