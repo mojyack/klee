@@ -5,6 +5,7 @@
 #include "console.hpp"
 #include "interrupt.hpp"
 #include "log.hpp"
+#include "memory-manager.hpp"
 #include "memory-map.h"
 #include "mousecursor.hpp"
 #include "paging.hpp"
@@ -26,8 +27,9 @@ class Kernel {
     MemoryMap         memory_map;
     FramebufferConfig framebuffer_config;
 
-    Console     console;
-    MouseCursor mousecursor;
+    BitmapMemoryManager memory_manager;
+    Console             console;
+    MouseCursor         mousecursor;
 
     usb::xhci::Controller* xhc;
 
@@ -66,22 +68,24 @@ class Kernel {
   public:
     auto run() -> void {
         // set global objects
-        kernel    = this;
-        ::console = &console;
+        kernel      = this;
+        ::console   = &console;
+        ::allocator = &memory_manager;
 
         // resize console
         constexpr auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
         console.resize(framebuffer_config.vertical_resolution / font_size[1], framebuffer_config.horizontal_resolution / font_size[0]);
         logger(LogLevel::Debug, "klee\n");
+        printk("%lu\n", sizeof(BitmapMemoryManager) / 1024);
 
-        //// setup segments
+        // setup segments
         setup_segments();
         set_dsall(0);
         set_csss(1 << 3, 2 << 3);
         setup_identity_page_table();
 
         // print memory map
-        printk("memory_map: %p\n", &memory_map);
+        logger(LogLevel::Debug, "memory_map: %p\n", &memory_map);
         for(auto iter = reinterpret_cast<uintptr_t>(memory_map.buffer); iter < reinterpret_cast<uintptr_t>(memory_map.buffer) + memory_map.map_size; iter += memory_map.descriptor_size) {
             const auto& desc = *reinterpret_cast<MemoryDescriptor*>(iter);
             const auto  type = static_cast<MemoryType>(desc.type);
@@ -92,8 +96,26 @@ class Kernel {
             const auto begin = desc.physical_start;
             const auto end   = begin + pages * 4096;
             const auto attr  = desc.attribute;
-            printk("type = %u, phys = [%08lx - %08lx), pages = %lu, attr = %08lx\n", type, begin, end, pages, attr);
+            logger(LogLevel::Debug, "type = %u, phys = [%08lx - %08lx), pages = %lu, attr = %08lx\n", type, begin, end, pages, attr);
         }
+
+        // initialize allocator 
+        const auto memory_map_base = reinterpret_cast<uintptr_t>(memory_map.buffer);
+        auto                            available_end   = uintptr_t(0);
+        for(auto iter = memory_map_base; iter < memory_map_base + memory_map.map_size; iter += memory_map.descriptor_size) {
+            const auto& desc = *reinterpret_cast<MemoryDescriptor*>(iter);
+            if(available_end < desc.physical_start) {
+                memory_manager.set_bits(FrameID(available_end / bytes_per_frame), (desc.physical_start - available_end) / bytes_per_frame, true);
+            }
+
+            const auto physical_end = desc.physical_start + desc.number_of_pages * uefi_page_size;
+            if(is_available_memory_type(static_cast<MemoryType>(desc.type))) {
+                available_end = physical_end;
+            } else {
+                memory_manager.set_bits(FrameID(desc.physical_start / bytes_per_frame), desc.number_of_pages * uefi_page_size / bytes_per_frame, true);
+            }
+        }
+        memory_manager.set_range(FrameID(1), FrameID(available_end / bytes_per_frame));
 
         // setup idt
         const auto cs = read_cs();
@@ -193,8 +215,11 @@ class Kernel {
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];
 
+auto kernel_instance_buffer = std::array<uint8_t, sizeof(Kernel)>();
+
 extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferConfig& framebuffer_config_ref) {
-    Kernel(memory_map_ref, framebuffer_config_ref).run();
+    new(kernel_instance_buffer.data()) Kernel(memory_map_ref, framebuffer_config_ref);
+    reinterpret_cast<Kernel*>(kernel_instance_buffer.data())->run();
     while(1) {
         __asm__("hlt");
     }

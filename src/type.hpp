@@ -17,6 +17,19 @@ struct Point {
     Point(const int x, const int y) : x(x), y(y) {}
 };
 
+struct Rectangle {
+    Point a;
+    Point b;
+
+    auto width() const -> int {
+        return b.x - a.x;
+    }
+
+    auto hight() const -> int {
+        return b.y - a.y;
+    }
+};
+
 struct RGBColor {
     char r;
     char g;
