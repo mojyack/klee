@@ -12,15 +12,7 @@
 #include "elf.h"
 #include "framebuffer.h"
 #include "memory.h"
-
-struct MemoryMap {
-    UINTN  buffer_size;
-    VOID*  buffer;
-    UINTN  map_size;
-    UINTN  map_key;
-    UINTN  descriptor_size;
-    UINT32 descriptor_version;
-};
+#include "memory-map.h"
 
 EFI_STATUS get_memory_map(struct MemoryMap* const map) {
     if(map->buffer == NULL) {
@@ -179,7 +171,7 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
 
     // dump memory map
     CHAR8            memmap_buf[4096 * 4];
-    struct MemoryMap memmap = {sizeof(memmap_buf), memmap_buf, 0, 0, 0, 0};
+    struct MemoryMap memmap = {memmap_buf, sizeof(memmap_buf), 0, 0, 0, 0};
     assert(get_memory_map(&memmap), L"failed to get memory map");
 
     EFI_FILE_PROTOCOL* root_dir;
@@ -219,7 +211,7 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
     }
 
     // load kernel
-    typedef __attribute__((sysv_abi)) void EntryPointType(struct FramebufferConfig*);
+    typedef __attribute__((sysv_abi)) void EntryPointType(const struct MemoryMap*, const struct FramebufferConfig*);
 
     EntryPointType* entry;
     assert(load_elf(root_dir, L"\\kernel.elf", (EFI_PHYSICAL_ADDRESS*)&entry), L"failed to load kernel.elf");
@@ -231,7 +223,7 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
     }
 
     // call kernel
-    entry(&framebuffer_config);
+    entry(&memmap, &framebuffer_config);
 
     Print(L"done");
     while(1) {

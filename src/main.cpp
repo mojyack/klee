@@ -4,6 +4,8 @@
 #include "asmcode.h"
 #include "console.hpp"
 #include "interrupt.hpp"
+#include "log.hpp"
+#include "memory-map.h"
 #include "mousecursor.hpp"
 #include "pci.hpp"
 #include "print.hpp"
@@ -18,6 +20,9 @@ enum class Message {
 class Kernel {
   private:
     static inline Kernel* kernel;
+
+    const MemoryMap&         memory_map;
+    const FramebufferConfig& framebuffer_config;
 
     Console     console;
     MouseCursor mousecursor;
@@ -61,21 +66,43 @@ class Kernel {
         kernel    = this;
         ::console = &console;
 
-        printk("klee\n");
+        constexpr auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
+        console.resize(framebuffer_config.vertical_resolution / font_size[1], framebuffer_config.horizontal_resolution / font_size[0]);
+        logger(LogLevel::Debug, "klee\n");
+
+        constexpr auto available_memory_types = std::array{
+            MemoryType::EfiBootServicesCode,
+            MemoryType::EfiBootServicesData,
+            MemoryType::EfiConventionalMemory,
+        };
+
+        printk("memory_map: %p\n", &memory_map);
+        for(auto iter = reinterpret_cast<uintptr_t>(memory_map.buffer); iter < reinterpret_cast<uintptr_t>(memory_map.buffer) + memory_map.map_size; iter += memory_map.descriptor_size) {
+            const auto& desc = *reinterpret_cast<MemoryDescriptor*>(iter);
+            for(const auto type : available_memory_types) {
+                if(desc.type != type) {
+                    continue;
+                }
+                const auto pages = desc.number_of_pages;
+                const auto begin = desc.physical_start;
+                const auto end   = begin + pages * 4096;
+                const auto attr  = desc.attribute;
+                printk("type = %u, phys = [%08lx - %08lx), pages = %lu, attr = %08lx\n", type, begin, end, pages, attr);
+            }
+        }
 
         const auto cs = read_cs();
         set_idt_entry(idt[InterruptVector::Number::XHCI], make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(int_hander_xhci), cs);
         load_idt(sizeof(idt) - 1, reinterpret_cast<uintptr_t>(&idt[0]));
 
-        const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
-        auto       pci               = pci::Devices();
-        const auto error             = pci.scan_all_bus();
-        const auto& [size, devices]  = pci.get_devices();
-        auto xhc_dev                 = (const pci::Device*)(nullptr);
+        auto       pci              = pci::Devices();
+        const auto error            = pci.scan_all_bus();
+        const auto& [size, devices] = pci.get_devices();
+        auto xhc_dev                = (const pci::Device*)(nullptr);
         for(auto i = size_t(0); i < size; i += 1) {
             const auto& dev       = devices[i];
             const auto  vendor_id = pci::read_vender_id(dev.bus, dev.device, dev.function);
-            printk("%d.%d.%d: vend %04x, class %08x, head %02x\n", dev.bus, dev.device, dev.function, vendor_id, dev.class_code, dev.header_type);
+            logger(LogLevel::Debug, "%d.%d.%d: vend %04x, class %08x, head %02x\n", dev.bus, dev.device, dev.function, vendor_id, dev.class_code, dev.header_type);
 
             if(dev.class_code.match(0x0Cu, 0x03u, 0x30u)) {
                 if(xhc_dev == nullptr || (xhc_dev->read_vender_id() != 0x8086 && vendor_id == 0x8086)) {
@@ -83,20 +110,21 @@ class Kernel {
                 }
             }
         }
-        printk("pci bus scan result: %s\n", error.to_str());
+        logger(LogLevel::Debug, "pci bus scan result: %s\n", error.to_str());
+        const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
         xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, InterruptVector::Number::XHCI, 0);
 
         const auto xhc_bar = xhc_dev->read_bar(0);
         if(xhc_dev != nullptr) {
             if(xhc_bar) {
                 const auto xhc_mmio_base = xhc_bar.as_value() & ~static_cast<uint64_t>(0x0F);
-                printk("xHC mmio_base = %08lx\n", xhc_mmio_base);
+                logger(LogLevel::Debug, "xHC mmio_base = %08lx\n", xhc_mmio_base);
             }
         } else {
-            printk("no xhc device found\n");
+            logger(LogLevel::Warn, "no xhc device found\n");
         }
         if(!xhc_bar) {
-            printk("failed to read xhc bar\n");
+            logger(LogLevel::Error, "failed to read xhc bar\n");
             while(1) {
                 __asm__("hlt");
             }
@@ -108,7 +136,7 @@ class Kernel {
         if(xhc_dev->read_vender_id() == 0x8086) {
             switch_ehci_to_xhci(pci, *xhc_dev);
         }
-        printk("xhc initialize: %s\n", xhc.initialize().to_str());
+        logger(LogLevel::Debug, "xhc initialize: %s\n", xhc.initialize().to_str());
         xhc.run();
 
         usb::HIDMouseDriver::default_observer = [this](int8_t displacement_x, int8_t displacement_y) -> void {
@@ -119,7 +147,7 @@ class Kernel {
             auto port = xhc.get_port_at(i);
             if(port.is_connected()) {
                 if(const auto error = xhc.configure_port(port)) {
-                    printk("failed to configure port: %s\n", error.to_str());
+                    logger(LogLevel::Error, "failed to configure port: %s\n", error.to_str());
                     continue;
                 }
             }
@@ -139,7 +167,7 @@ class Kernel {
         case Message::XHCIInterrupt:
             while(kernel->xhc->has_unprocessed_event()) {
                 if(const auto error = kernel->xhc->process_event()) {
-                    // printk("failed to process event: %s\n", error.to_str());
+                    logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
                 }
             }
             break;
@@ -147,12 +175,14 @@ class Kernel {
         goto loop;
     }
 
-    Kernel(const FramebufferConfig& framebuffer_config) : console(framebuffer_config), mousecursor(framebuffer_config) {}
+    Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) : memory_map(memory_map),
+                                                                                       framebuffer_config(framebuffer_config),
+                                                                                       console(framebuffer_config),
+                                                                                       mousecursor(framebuffer_config) {}
 };
 
-extern "C" void kernel_main(const FramebufferConfig& framebuffer_config) {
-    auto kernel = Kernel(framebuffer_config);
-    kernel.run();
+extern "C" void kernel_main(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) {
+    Kernel(memory_map, framebuffer_config).run();
     while(1) {
         __asm__("hlt");
     }
