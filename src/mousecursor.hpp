@@ -46,8 +46,14 @@ class MouseCursor {
         if(pos.x < 0) {
             pos.x = 0;
         }
+        if(pos.x >= config.horizontal_resolution) {
+            pos.x = config.horizontal_resolution - 1;
+        }
         if(pos.y < 0) {
             pos.y = 0;
+        }
+        if(pos.y >= config.vertical_resolution) {
+            pos.y = config.vertical_resolution - 1;
         }
     }
 
@@ -67,10 +73,10 @@ class MouseCursor {
         }
         backup_pos = pos;
 
-        for(auto y = uint32_t(0); y < mousecursor_height; y += 1) {
-            for(auto x = uint32_t(0); x < mousecursor_width; x += 1) {
+        for(auto y = pos.y; y < config.vertical_resolution && y - pos.y < mousecursor_height; y += 1) {
+            for(auto x = pos.x; x < config.horizontal_resolution && x - pos.x < mousecursor_width; x += 1) {
                 auto color = uint8_t();
-                switch(mousecursor_shape[y][x]) {
+                switch(mousecursor_shape[y - pos.y][x - pos.x]) {
                 case '@':
                     color = 0xFF;
                     break;
@@ -80,7 +86,7 @@ class MouseCursor {
                 default:
                     continue;
                 }
-                FRAMEBUFFER_INVOKE(write_pixel, config, pos + Point(x, y), color);
+                FRAMEBUFFER_INVOKE(write_pixel, config, {x, y}, color);
             }
         }
     }
