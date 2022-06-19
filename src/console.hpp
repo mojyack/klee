@@ -32,15 +32,10 @@ class Console : public Window {
             row += 1;
         } else {
             head = (head + 1) % buffer.size();
+            scroll(-font_size[1]);
+            draw_rect(Point(0, (rows - 1) * font_size[1]), Point(font_size[0] * columns, font_size[1] * rows), 0x000000FF);
         }
         buffer[tail == 0 ? buffer.size() - 1 : tail - 1].len = 0;
-
-        draw_rect({0, 0}, Point(font_size[0] * columns, font_size[1] * rows), 0x000000FF);
-
-        for(auto i = head, n = uint32_t(0); n == 0 || i != tail; i = (i + 1) % buffer.size(), n += 1) {
-            const auto& l = buffer[i];
-            draw_string(calc_position(n, 0), std::string_view(l.data.data(), l.len), 0xFFFFFFFF);
-        }
     }
 
     auto draw_ascii(const Point point, const char c, const RGBAColor color) -> void {

@@ -17,8 +17,9 @@ class Window {
   private:
     std::array<int, 2>    size;
     std::vector<uint32_t> buffer;
-    Point                 pos            = {0, 0};
-    PositionConstraints   pos_constraint = PositionConstraints::Free;
+    Point                 pos              = {0, 0};
+    PositionConstraints   pos_constraint   = PositionConstraints::Free;
+    bool                  is_alpha_enabled = false;
 
     auto fix_position() -> void {
         switch(pos_constraint) {
@@ -53,6 +54,10 @@ class Window {
         buffer.resize(new_width * new_height);
     }
 
+    auto enable_alpha(const bool flag) -> void {
+        is_alpha_enabled = flag;
+    }
+
     auto draw_pixel(const Point pos, const RGBAColor color) -> Error {
         const auto i = pos.y * size[0] + pos.x;
         if(i >= buffer.size()) {
@@ -69,6 +74,25 @@ class Window {
                 draw_pixel({x, y}, color);
             }
         }
+    }
+
+    auto scroll(const int dy) -> Error {
+        if(abs(dy) >= size[1]) {
+            return Error::Code::IndexOutOfRange;
+        }
+
+        if(dy > 0) {
+            for(auto y = size[1] - dy - 1; y >= 0; y -= 1) {
+                const auto offset = y * size[0];
+                memcpy(buffer.data() + offset, buffer.data() + offset + dy * size[0], size[0] * 4);
+            }
+        } else if(dy < 0) {
+            for(auto y = -dy; y < size[1]; y += 1) {
+                const auto offset = y * size[0];
+                memcpy(buffer.data() + offset + dy * size[0], buffer.data() + offset, size[0] * 4);
+            }
+        }
+        return Error::Code::Success;
     }
 
   public:
@@ -94,6 +118,10 @@ class Window {
 
     auto get_buffer() const -> const std::vector<uint32_t> {
         return buffer;
+    }
+
+    auto has_alpha() const -> bool {
+        return is_alpha_enabled;
     }
 
     auto operator=(const Window& o) -> Window& = delete;

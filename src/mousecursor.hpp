@@ -55,6 +55,7 @@ class MouseCursor : public Window {
     }
 
     MouseCursor() : Window(mousecursor_width, mousecursor_height) {
+        enable_alpha(true);
         set_position_constraint(PositionConstraints::WithinScreen);
     }
 };

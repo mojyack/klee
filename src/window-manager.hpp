@@ -22,22 +22,33 @@ class WindowManager {
         const auto fb_size = framebuffer->get_size();
         for(const auto& w : windows) {
             w->refresh_buffer();
-            const auto  pos     = w->get_position();
-            const auto  size    = w->get_size();
-            const auto  y_begin = pos.y >= 0 ? pos.y : 0;
-            const auto  y_limit = min(pos.y + size[1], 0 + fb_size[1]);
-            const auto  x_begin = pos.x >= 0 ? pos.x : 0;
-            const auto  x_limit = min(pos.x + size[0], 0 + fb_size[0]);
-            const auto& buffer  = w->get_buffer();
-            for(auto y = y_begin; y < y_limit; y += 1) {
-                for(auto x = x_begin; x < x_limit; x += 1) {
-                    const auto dst_color = RGBAColor(framebuffer->read_pixel({x, y}), RGBAColor::from_native);
-                    const auto src_color = RGBAColor(buffer[(y - y_begin) * size[0] + (x - x_begin)], RGBAColor::from_native);
-                    const auto opacity   = 1. * src_color.a / 0xFF;
-                    const auto r         = src_color.r * opacity + dst_color.r * (1 - opacity);
-                    const auto g         = src_color.g * opacity + dst_color.g * (1 - opacity);
-                    const auto b         = src_color.b * opacity + dst_color.b * (1 - opacity);
-                    framebuffer->write_pixel({x, y}, RGBColor(r, g, b));
+            const auto  pos         = w->get_position();
+            const auto  size        = w->get_size();
+            const auto  y_begin     = pos.y >= 0 ? pos.y : 0;
+            const auto  y_limit     = min(pos.y + size[1], 0 + fb_size[1]);
+            const auto  y_src_offet = pos.y < 0 ? -pos.y : 0;
+            const auto  x_begin     = pos.x >= 0 ? pos.x : 0;
+            const auto  x_limit     = min(pos.x + size[0], 0 + fb_size[0]);
+            const auto  x_src_offet = pos.x < 0 ? -pos.x : 0;
+            const auto& buffer      = w->get_buffer();
+            if(w->has_alpha()) {
+                for(auto y = y_begin; y < y_limit; y += 1) {
+                    const auto src_y = y - y_begin + y_src_offet;
+                    for(auto x = x_begin; x < x_limit; x += 1) {
+                        const auto src_x     = x - x_begin + x_src_offet;
+                        const auto dst_color = RGBAColor(framebuffer->read_pixel({x, y}), RGBAColor::from_native);
+                        const auto src_color = RGBAColor(buffer[src_y * size[0] + src_x], RGBAColor::from_native);
+                        const auto opacity   = 1. * src_color.a / 0xFF;
+                        const auto r         = src_color.r * opacity + dst_color.r * (1 - opacity);
+                        const auto g         = src_color.g * opacity + dst_color.g * (1 - opacity);
+                        const auto b         = src_color.b * opacity + dst_color.b * (1 - opacity);
+                        framebuffer->write_pixel({x, y}, RGBColor(r, g, b));
+                    }
+                }
+            } else {
+                for(auto y = y_begin; y < y_limit; y += 1) {
+                    const auto src_y = y - y_begin + y_src_offet;
+                    framebuffer->copy_array(buffer.data() + src_y * size[0] + x_src_offet, {x_begin, y}, x_limit - x_begin);
                 }
             }
         }

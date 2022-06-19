@@ -58,6 +58,10 @@ class Framebuffer {
         }
     }
 
+    auto copy_array(const uint32_t* const source, const Point dest, const size_t len) -> void {
+        memcpy(config.frame_buffer + find_address(dest) * 4, source, len * 4);
+    }
+
     Framebuffer(const FramebufferConfig& config) : config(config) {}
 };
 

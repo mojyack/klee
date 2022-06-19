@@ -13,6 +13,7 @@
 #include "print.hpp"
 #include "queue.hpp"
 #include "segment.hpp"
+#include "timer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "window-manager.hpp"
