@@ -30,6 +30,9 @@ out/stub.o: src/stub.cpp
 out/asmcode.o: src/asmcode.asm src/asmcode.h
 	nasm -f elf64 -o $@ $<
 
+out/libc-support.o: src/libc-support.cpp
+	${CXX} -o $@ $<
+
 out/main.o: src/main.cpp src
 	${CXX} -o $@ $<
 
@@ -43,8 +46,8 @@ out/font.o: src/font.txt
 	--redefine-sym _binary_out_font_bin_size=font_limit \
 	$@ $@
 
-out/kernel.elf: out/main.o out/stub.o out/font.o out/asmcode.o
-	ld.lld --entry kernel_entry -z norelro --image-base 0x100000 --static -L${LIBRARY} -lc -o $@ $^
+out/kernel.elf: out/main.o out/stub.o out/font.o out/asmcode.o out/libc-support.o
+	ld.lld --entry kernel_entry -z norelro --image-base 0x100000 --static -lc -lc++ -lc++abi -L${LIBRARY} -lc -o $@ $^
 
 out/volume:
 	mkdir -p out

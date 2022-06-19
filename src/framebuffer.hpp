@@ -10,7 +10,6 @@
 template <class T>
 concept Color = std::is_same_v<T, RGBColor> || std::is_same_v<T, uint8_t>;
 
-template <PixelFormat>
 class Framebuffer {
   private:
     constexpr static std::array<uint32_t, 2> font_size = {8, 16};
@@ -26,7 +25,16 @@ class Framebuffer {
         return font_size;
     }
 
-    auto write_pixel(const Point point, const Color auto color) -> void;
+    auto get_size() const -> std::array<size_t, 2> {
+        return {config.horizontal_resolution, config.vertical_resolution};
+    }
+
+    auto write_pixel(const Point point, const RGBColor color) -> void {
+        auto p = &config.frame_buffer[find_address(point) * 4];
+        p[0]   = color.b;
+        p[1]   = color.g;
+        p[2]   = color.r;
+    }
 
     auto write_pixel(const Point point, const uint32_t color) -> void {
         auto p = reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
@@ -34,11 +42,12 @@ class Framebuffer {
     }
 
     auto write_pixel(const Point point, const uint8_t color) -> void {
-        write_pixel(point, static_cast<uint32_t>(color | color << 8 | color << 16 | color << 24));
+        auto p = reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
+        *p     = color | color << 8 | color << 16 | color << 24;
     }
 
-    auto read_pixel(const Point point, uint32_t& ret) -> auto{
-        ret = *reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
+    auto read_pixel(const Point point) -> uint32_t {
+        return *reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
     }
 
     auto write_rect(const Point a, const Point b, const Color auto color) -> void {
@@ -80,45 +89,3 @@ class Framebuffer {
 
     Framebuffer(const FramebufferConfig& config) : config(config) {}
 };
-
-template <>
-template <>
-inline auto Framebuffer<PixelRGBResv8BitPerColor>::write_pixel<RGBColor>(const Point point, const RGBColor color) -> void {
-    auto p = &config.frame_buffer[find_address(point) * 4];
-    p[0]   = color.r;
-    p[1]   = color.g;
-    p[2]   = color.b;
-}
-
-template <>
-template <>
-inline auto Framebuffer<PixelRGBResv8BitPerColor>::write_pixel<uint8_t>(const Point point, const uint8_t color) -> void {
-    auto p = reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
-    *p     = color | color << 8 | color << 16 | color << 24;
-}
-
-template <>
-template <>
-inline auto Framebuffer<PixelBGRResv8BitPerColor>::write_pixel<RGBColor>(const Point point, const RGBColor color) -> void {
-    auto p = &config.frame_buffer[find_address(point) * 4];
-    p[0]   = color.b;
-    p[1]   = color.g;
-    p[2]   = color.r;
-}
-
-template <>
-template <>
-inline auto Framebuffer<PixelBGRResv8BitPerColor>::write_pixel<uint8_t>(const Point point, const uint8_t color) -> void {
-    auto p = reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
-    *p     = color | color << 8 | color << 16 | color << 24;
-}
-
-#define FRAMEBUFFER_INVOKE(fn, config, ...)                            \
-    switch(config.pixel_format) {                                      \
-    case PixelRGBResv8BitPerColor: {                                   \
-        Framebuffer<PixelRGBResv8BitPerColor>(config).fn(__VA_ARGS__); \
-    }                                                                  \
-    case PixelBGRResv8BitPerColor: {                                   \
-        Framebuffer<PixelBGRResv8BitPerColor>(config).fn(__VA_ARGS__); \
-    }                                                                  \
-    }

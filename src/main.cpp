@@ -24,8 +24,8 @@ class Kernel {
   private:
     static inline Kernel* kernel;
 
-    MemoryMap         memory_map;
-    FramebufferConfig framebuffer_config;
+    MemoryMap   memory_map;
+    Framebuffer framebuffer;
 
     BitmapMemoryManager memory_manager;
     Console             console;
@@ -73,10 +73,9 @@ class Kernel {
         ::allocator = &memory_manager;
 
         // resize console
-        constexpr auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
-        console.resize(framebuffer_config.vertical_resolution / font_size[1], framebuffer_config.horizontal_resolution / font_size[0]);
+        constexpr auto font_size = Framebuffer::get_font_size();
+        console.resize(framebuffer.get_size()[1] / font_size[1], framebuffer.get_size()[2] / font_size[0]);
         logger(LogLevel::Debug, "klee\n");
-        printk("%lu\n", sizeof(BitmapMemoryManager) / 1024);
 
         // setup segments
         setup_segments();
@@ -84,24 +83,9 @@ class Kernel {
         set_csss(1 << 3, 2 << 3);
         setup_identity_page_table();
 
-        // print memory map
-        logger(LogLevel::Debug, "memory_map: %p\n", &memory_map);
-        for(auto iter = reinterpret_cast<uintptr_t>(memory_map.buffer); iter < reinterpret_cast<uintptr_t>(memory_map.buffer) + memory_map.map_size; iter += memory_map.descriptor_size) {
-            const auto& desc = *reinterpret_cast<MemoryDescriptor*>(iter);
-            const auto  type = static_cast<MemoryType>(desc.type);
-            if(!is_available_memory_type(type)) {
-                continue;
-            }
-            const auto pages = desc.number_of_pages;
-            const auto begin = desc.physical_start;
-            const auto end   = begin + pages * 4096;
-            const auto attr  = desc.attribute;
-            logger(LogLevel::Debug, "type = %u, phys = [%08lx - %08lx), pages = %lu, attr = %08lx\n", type, begin, end, pages, attr);
-        }
-
-        // initialize allocator 
+        // initialize allocator
         const auto memory_map_base = reinterpret_cast<uintptr_t>(memory_map.buffer);
-        auto                            available_end   = uintptr_t(0);
+        auto       available_end   = uintptr_t(0);
         for(auto iter = memory_map_base; iter < memory_map_base + memory_map.map_size; iter += memory_map.descriptor_size) {
             const auto& desc = *reinterpret_cast<MemoryDescriptor*>(iter);
             if(available_end < desc.physical_start) {
@@ -116,6 +100,7 @@ class Kernel {
             }
         }
         memory_manager.set_range(FrameID(1), FrameID(available_end / bytes_per_frame));
+        memory_manager.initialize_heap();
 
         // setup idt
         const auto cs = read_cs();
@@ -208,9 +193,9 @@ class Kernel {
     }
 
     Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) : memory_map(memory_map),
-                                                                                       framebuffer_config(framebuffer_config),
-                                                                                       console(framebuffer_config),
-                                                                                       mousecursor(framebuffer_config) {}
+                                                                                       framebuffer(framebuffer_config),
+                                                                                       console(framebuffer),
+                                                                                       mousecursor(framebuffer) {}
 };
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];

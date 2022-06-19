@@ -34,47 +34,51 @@ class MouseCursor {
         "         @@@   ",
     };
 
-    const FramebufferConfig& config;
-    Point                    pos;
+    Framebuffer& fb;
+    Point        pos;
 
     std::array<uint32_t, mousecursor_width * mousecursor_height> backup;
     std::optional<Point>                                         backup_pos;
 
   public:
     auto move_relative(const Point displacement) -> void {
+        const auto [width, height] = fb.get_size();
+
         pos += displacement;
         if(pos.x < 0) {
             pos.x = 0;
         }
-        if(pos.x >= config.horizontal_resolution) {
-            pos.x = config.horizontal_resolution - 1;
+        if(pos.x >= width) {
+            pos.x = width - 1;
         }
         if(pos.y < 0) {
             pos.y = 0;
         }
-        if(pos.y >= config.vertical_resolution) {
-            pos.y = config.vertical_resolution - 1;
+        if(pos.y >= height) {
+            pos.y = height - 1;
         }
     }
 
     auto draw() -> void {
+        const auto [width, height] = fb.get_size();
+
         if(backup_pos) {
-            for(auto y = backup_pos->y; y < config.vertical_resolution && y - backup_pos->y < mousecursor_height; y += 1) {
-                for(auto x = backup_pos->x; x < config.horizontal_resolution && x - backup_pos->x < mousecursor_width; x += 1) {
-                    FRAMEBUFFER_INVOKE(write_pixel, config, {x, y}, backup[(y - backup_pos->y) * mousecursor_width + (x - backup_pos->x)]);
+            for(auto y = backup_pos->y; y < height && y - backup_pos->y < mousecursor_height; y += 1) {
+                for(auto x = backup_pos->x; x < width && x - backup_pos->x < mousecursor_width; x += 1) {
+                    fb.write_pixel({x, y}, backup[(y - backup_pos->y) * mousecursor_width + (x - backup_pos->x)]);
                 }
             }
         }
 
-        for(auto y = pos.y; y < config.vertical_resolution && y - pos.y < mousecursor_height; y += 1) {
-            for(auto x = pos.x; x < config.horizontal_resolution && x - pos.x < mousecursor_width; x += 1) {
-                FRAMEBUFFER_INVOKE(read_pixel, config, {x, y}, backup[(y - pos.y) * mousecursor_width + (x - pos.x)]);
+        for(auto y = pos.y; y < height && y - pos.y < mousecursor_height; y += 1) {
+            for(auto x = pos.x; x < width && x - pos.x < mousecursor_width; x += 1) {
+                backup[(y - pos.y) * mousecursor_width + (x - pos.x)] = fb.read_pixel({x, y});
             }
         }
         backup_pos = pos;
 
-        for(auto y = pos.y; y < config.vertical_resolution && y - pos.y < mousecursor_height; y += 1) {
-            for(auto x = pos.x; x < config.horizontal_resolution && x - pos.x < mousecursor_width; x += 1) {
+        for(auto y = pos.y; y < height && y - pos.y < mousecursor_height; y += 1) {
+            for(auto x = pos.x; x < width && x - pos.x < mousecursor_width; x += 1) {
                 auto color = uint8_t();
                 switch(mousecursor_shape[y - pos.y][x - pos.x]) {
                 case '@':
@@ -86,10 +90,10 @@ class MouseCursor {
                 default:
                     continue;
                 }
-                FRAMEBUFFER_INVOKE(write_pixel, config, {x, y}, color);
+                fb.write_pixel({x, y}, color);
             }
         }
     }
 
-    MouseCursor(const FramebufferConfig& config) : config(config), pos(config.horizontal_resolution / 2, config.vertical_resolution / 2) {}
+    MouseCursor(Framebuffer& fb) : fb(fb), pos(fb.get_size()[0] / 2, fb.get_size()[1] / 2) {}
 };

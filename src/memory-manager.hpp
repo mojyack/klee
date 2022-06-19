@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "error.hpp"
+#include "libc-support.hpp"
 
 #define MM_DEBUG_PRINT 0
 #if MM_DEBUG_PRINT == 1
@@ -105,6 +106,19 @@ class BitmapMemoryManager {
     auto set_range(const FrameID begin, const FrameID end) -> void {
         range_begin = begin;
         range_end   = end;
+    }
+
+    auto initialize_heap() -> Error {
+        constexpr auto heap_frames = 64 * 512;
+
+        const auto heap_start = allocate(heap_frames);
+        if(!heap_start) {
+            return heap_start.as_error();
+        }
+
+        program_break     = reinterpret_cast<caddr_t>(heap_start.as_value().get_id() * bytes_per_frame);
+        program_break_end = program_break + heap_frames * bytes_per_frame;
+        return Error::Code::Success;
     }
 
 #if MM_DEBUG_PRINT == 1

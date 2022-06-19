@@ -13,7 +13,7 @@ class Console {
         size_t                        len;
     };
 
-    const FramebufferConfig&   framebuffer_config;
+    Framebuffer&               fb;
     std::array<Line, max_rows> buffer;
 
     uint32_t head    = 0;
@@ -33,17 +33,17 @@ class Console {
         }
         buffer[tail == 0 ? buffer.size() - 1 : tail - 1].len = 0;
 
-        constexpr auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
-        FRAMEBUFFER_INVOKE(write_rect, framebuffer_config, {0, 0}, Point(font_size[0] * columns, font_size[1] * rows), uint8_t(0x00));
+        constexpr auto font_size = Framebuffer::get_font_size();
+        fb.write_rect({0, 0}, Point(font_size[0] * columns, font_size[1] * rows), uint8_t(0x00));
 
         for(auto i = head, n = uint32_t(0); n == 0 || i != tail; i = (i + 1) % buffer.size(), n += 1) {
             const auto& l = buffer[i];
-            FRAMEBUFFER_INVOKE(write_string, framebuffer_config, calc_position(n, 0), std::string_view(l.data.data(), l.len), uint8_t(0xFF));
+            fb.write_string(calc_position(n, 0), std::string_view(l.data.data(), l.len), uint8_t(0xFF));
         }
     }
 
     static auto calc_position(const uint32_t row, const uint32_t column) -> Point {
-        constexpr auto font_size = Framebuffer<PixelRGBResv8BitPerColor>::get_font_size();
+        constexpr auto font_size = Framebuffer::get_font_size();
         return Point(font_size[0] * column, font_size[1] * row);
     }
 
@@ -58,7 +58,7 @@ class Console {
             line.data[column] = c;
             line.len += 1;
             if(column + 1 != columns) {
-                FRAMEBUFFER_INVOKE(write_ascii, framebuffer_config, calc_position(row, column), c, uint8_t(0xFF));
+                fb.write_ascii(calc_position(row, column), c, uint8_t(0xFF));
                 column += 1;
             } else {
                 newline();
@@ -82,7 +82,7 @@ class Console {
         }
     }
 
-    Console(const FramebufferConfig& framebuffer_config) : framebuffer_config(framebuffer_config) {
+    Console(Framebuffer& fb) : fb(fb) {
         buffer[0].len = 0;
     }
 };
