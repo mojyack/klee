@@ -7,7 +7,6 @@
 
 class Console : public Window {
   private:
-    constexpr static auto font_size   = std::array<uint32_t, 2>{8, 16};
     constexpr static auto max_rows    = size_t(50);
     constexpr static auto max_columns = size_t(160);
 
@@ -16,6 +15,7 @@ class Console : public Window {
         size_t                        len;
     };
 
+    std::array<uint32_t, 2>    font_size;
     std::array<Line, max_rows> buffer;
 
     uint32_t head    = 0;
@@ -38,30 +38,12 @@ class Console : public Window {
         buffer[tail == 0 ? buffer.size() - 1 : tail - 1].len = 0;
     }
 
-    auto draw_ascii(const Point point, const char c, const RGBAColor color) -> void {
-        const auto font = get_font(c);
-        for(auto y = 0; y < font_size[1]; y += 1) {
-            for(auto x = 0; x < font_size[0]; x += 1) {
-                if(!((font[y] << x) & 0x80u)) {
-                    continue;
-                }
-                draw_pixel({x + point.x, y + point.y}, color);
-            }
-        }
-    }
-
-    auto draw_string(const Point point, const std::string_view str, const RGBAColor color) -> void {
-        for(auto i = uint32_t(0); i < str.size(); i += 1) {
-            draw_ascii(Point(point.x + font_size[0] * i, point.y), str[i], color);
-        }
-    }
-
-    static auto calc_position(const uint32_t row, const uint32_t column) -> Point {
+    auto calc_position(const uint32_t row, const uint32_t column) -> Point {
         return Point(font_size[0] * column, font_size[1] * row);
     }
 
   public:
-    static constexpr auto get_font_size() -> std::array<uint32_t, 2> {
+    auto get_font_size() const -> std::array<uint32_t, 2> {
         return font_size;
     }
 
@@ -103,8 +85,8 @@ class Console : public Window {
 
     auto refresh_buffer() -> void override {}
 
-    Console(const uint32_t rows, const uint32_t columns) {
-        resize(rows, columns);
+    Console(const int width, const int height) : font_size(::get_font_size()) {
+        resize(height / font_size[1], width / font_size[0]);
     }
 };
 

@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstdint>
 
 extern const uint8_t font_start;
@@ -11,4 +12,8 @@ inline auto get_font(const char c) -> const uint8_t* {
         return nullptr;
     }
     return &font_start + index;
+}
+
+inline constexpr auto get_font_size() -> std::array<uint32_t, 2> {
+    return {8, 16};
 }

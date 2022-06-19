@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdio>
 
+#include "apps/counter.hpp"
 #include "asmcode.h"
 #include "console.hpp"
 #include "interrupt.hpp"
@@ -26,10 +27,9 @@ class Kernel {
   private:
     static inline Kernel* kernel;
 
-    MemoryMap   memory_map;
-    Framebuffer framebuffer;
-
+    MemoryMap           memory_map;
     BitmapMemoryManager memory_manager;
+    FramebufferConfig   framebuffer_config;
     MouseCursor*        mousecursor;
 
     usb::xhci::Controller* xhc;
@@ -93,17 +93,19 @@ class Kernel {
         memory_manager.initialize_heap();
 
         // set global objects
-        kernel        = this;
-        ::allocator   = &memory_manager;
-        ::framebuffer = &framebuffer;
+        kernel      = this;
+        allocator   = &memory_manager;
+        framebuffer = new Framebuffer(framebuffer_config);
 
-        const auto     window_manager = std::unique_ptr<WindowManager>(new WindowManager());
-        constexpr auto font_size      = Console::get_font_size();
-        const auto     fb_size        = framebuffer.get_size();
-        ::console                     = window_manager->open_window<Console>(fb_size[1] / font_size[1], fb_size[0] / font_size[0]);
+        const auto window_manager    = std::unique_ptr<WindowManager>(new WindowManager());
+        const auto background_layer  = window_manager->create_layer();
+        const auto appliction_layer  = window_manager->create_layer();
+        const auto mousecursor_layer = window_manager->create_layer();
+        const auto fb_size           = framebuffer->get_size();
+        ::console                    = window_manager->get_layer(background_layer).open_window<Console>(fb_size[0], fb_size[1]);
 
         // create mouse cursor
-        mousecursor = window_manager->open_window<MouseCursor>();
+        mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
 
         // setup idt
         const auto cs = read_cs();
@@ -173,10 +175,16 @@ class Kernel {
             }
         }
 
+        // open counter app
+        const auto counter_app = window_manager->get_layer(appliction_layer).open_window<CounterApp>();
+
     loop:
+        counter_app->increment();
+        window_manager->refresh();
+        framebuffer->swap();
         __asm__("cli");
         if(main_queue.is_empty()) {
-            __asm__("sti\n\thlt");
+            __asm__("sti");
             goto loop;
         }
         const auto message = main_queue.get_front();
@@ -190,14 +198,13 @@ class Kernel {
                     logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
                 }
             }
-            window_manager->refresh();
             break;
         }
         goto loop;
     }
 
     Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) : memory_map(memory_map),
-                                                                                       framebuffer(framebuffer_config) {}
+                                                                                       framebuffer_config(framebuffer_config) {}
 };
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];

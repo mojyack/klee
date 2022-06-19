@@ -2,7 +2,7 @@
 #include "framebuffer.hpp"
 #include "window.hpp"
 
-class WindowManager {
+class Layer {
   private:
     std::vector<std::unique_ptr<Window>> windows;
 
@@ -52,5 +52,31 @@ class WindowManager {
                 }
             }
         }
+    }
+};
+
+class WindowManager {
+  private:
+    std::vector<Layer> layers;
+
+  public:
+    auto create_layer() -> size_t {
+        auto id = layers.size();
+        layers.emplace_back();
+        return id;
+    }
+
+    auto get_layer(const size_t id) -> Layer& {
+        return layers[id];
+    }
+
+    auto refresh() -> void {
+        for(auto& l : layers) {
+            l.refresh();
+        }
+    }
+
+    auto refresh_layer(const size_t id) -> void {
+        layers[id].refresh();
     }
 };

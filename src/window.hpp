@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "error.hpp"
+#include "font.hpp"
 #include "framebuffer.hpp"
 #include "type.hpp"
 
@@ -74,6 +75,28 @@ class Window {
                 draw_pixel({x, y}, color);
             }
         }
+    }
+
+    auto draw_ascii(const Point point, const char c, const RGBAColor color) -> void {
+        const auto font = get_font(c);
+        for(auto y = 0; y < get_font_size()[1]; y += 1) {
+            for(auto x = 0; x < get_font_size()[0]; x += 1) {
+                if(!((font[y] << x) & 0x80u)) {
+                    continue;
+                }
+                draw_pixel({x + point.x, y + point.y}, color);
+            }
+        }
+    }
+
+    auto draw_string(const Point point, const std::string_view str, const RGBAColor color) -> void {
+        for(auto i = uint32_t(0); i < str.size(); i += 1) {
+            draw_ascii(Point(point.x + get_font_size()[0] * i, point.y), str[i], color);
+        }
+    }
+
+    auto get_font_size() -> std::array<uint32_t, 2> {
+        return ::get_font_size();
     }
 
     auto scroll(const int dy) -> Error {

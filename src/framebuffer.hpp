@@ -2,6 +2,7 @@
 #include <array>
 #include <concepts>
 #include <string_view>
+#include <vector>
 
 #include "framebuffer-forward.h"
 #include "type.hpp"
@@ -9,6 +10,8 @@
 class Framebuffer {
   private:
     FramebufferConfig config;
+
+    std::vector<uint8_t> backbuffer;
 
     auto find_address(const Point point) -> uint64_t {
         return config.pixels_per_scan_line * point.y + point.x;
@@ -20,24 +23,24 @@ class Framebuffer {
     }
 
     auto write_pixel(const Point point, const RGBColor color) -> void {
-        auto p = &config.frame_buffer[find_address(point) * 4];
+        auto p = &backbuffer[find_address(point) * 4];
         p[0]   = color.b;
         p[1]   = color.g;
         p[2]   = color.r;
     }
 
     auto write_pixel(const Point point, const uint32_t color) -> void {
-        auto p = reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
+        auto p = reinterpret_cast<uint32_t*>(&backbuffer[find_address(point) * 4]);
         *p     = color;
     }
 
     auto write_pixel(const Point point, const uint8_t color) -> void {
-        auto p = reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
+        auto p = reinterpret_cast<uint32_t*>(&backbuffer[find_address(point) * 4]);
         *p     = color | color << 8 | color << 16 | color << 24;
     }
 
     auto read_pixel(const Point point) -> uint32_t {
-        return *reinterpret_cast<uint32_t*>(&config.frame_buffer[find_address(point) * 4]);
+        return *reinterpret_cast<uint32_t*>(&backbuffer[find_address(point) * 4]);
     }
 
     auto write_rect(const Point a, const Point b, const RGBColor color) -> void {
@@ -52,17 +55,22 @@ class Framebuffer {
         auto c = uint64_t(color | color << 8 | color << 16 | color << 24) | uint64_t(color | color << 8 | color << 16 | color << 24) << 32;
         for(auto y = a.y; y < b.y; y += 1) {
             for(auto x = a.x; x < b.x; x += 2) {
-                auto p = reinterpret_cast<uint64_t*>(&config.frame_buffer[find_address({x, y}) * 4]);
+                auto p = reinterpret_cast<uint64_t*>(&backbuffer[find_address({x, y}) * 4]);
                 *p     = c;
             }
         }
     }
 
     auto copy_array(const uint32_t* const source, const Point dest, const size_t len) -> void {
-        memcpy(config.frame_buffer + find_address(dest) * 4, source, len * 4);
+        memcpy(backbuffer.data() + find_address(dest) * 4, source, len * 4);
     }
 
-    Framebuffer(const FramebufferConfig& config) : config(config) {}
+    auto swap() -> void {
+        memcpy(config.frame_buffer, backbuffer.data(), backbuffer.size());
+    }
+
+    Framebuffer(const FramebufferConfig& config) : config(config),
+                                                   backbuffer(config.horizontal_resolution * config.vertical_resolution * 4) {}
 };
 
 inline auto framebuffer = (Framebuffer*)(nullptr);
