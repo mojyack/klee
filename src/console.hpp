@@ -1,19 +1,21 @@
 #pragma once
 #include <array>
+#include <string_view>
 
-#include "framebuffer.hpp"
+#include "font.hpp"
+#include "window.hpp"
 
-class Console {
+class Console : public Window {
   private:
-    constexpr static size_t max_rows    = 50;
-    constexpr static size_t max_columns = 160;
+    constexpr static auto font_size   = std::array<uint32_t, 2>{8, 16};
+    constexpr static auto max_rows    = size_t(50);
+    constexpr static auto max_columns = size_t(160);
 
     struct Line {
         std::array<char, max_columns> data;
         size_t                        len;
     };
 
-    Framebuffer&               fb;
     std::array<Line, max_rows> buffer;
 
     uint32_t head    = 0;
@@ -33,21 +35,41 @@ class Console {
         }
         buffer[tail == 0 ? buffer.size() - 1 : tail - 1].len = 0;
 
-        constexpr auto font_size = Framebuffer::get_font_size();
-        fb.write_rect({0, 0}, Point(font_size[0] * columns, font_size[1] * rows), uint8_t(0x00));
+        draw_rect({0, 0}, Point(font_size[0] * columns, font_size[1] * rows), 0x000000FF);
 
         for(auto i = head, n = uint32_t(0); n == 0 || i != tail; i = (i + 1) % buffer.size(), n += 1) {
             const auto& l = buffer[i];
-            fb.write_string(calc_position(n, 0), std::string_view(l.data.data(), l.len), uint8_t(0xFF));
+            draw_string(calc_position(n, 0), std::string_view(l.data.data(), l.len), 0xFFFFFFFF);
+        }
+    }
+
+    auto draw_ascii(const Point point, const char c, const RGBAColor color) -> void {
+        const auto font = get_font(c);
+        for(auto y = 0; y < font_size[1]; y += 1) {
+            for(auto x = 0; x < font_size[0]; x += 1) {
+                if(!((font[y] << x) & 0x80u)) {
+                    continue;
+                }
+                draw_pixel({x + point.x, y + point.y}, color);
+            }
+        }
+    }
+
+    auto draw_string(const Point point, const std::string_view str, const RGBAColor color) -> void {
+        for(auto i = uint32_t(0); i < str.size(); i += 1) {
+            draw_ascii(Point(point.x + font_size[0] * i, point.y), str[i], color);
         }
     }
 
     static auto calc_position(const uint32_t row, const uint32_t column) -> Point {
-        constexpr auto font_size = Framebuffer::get_font_size();
         return Point(font_size[0] * column, font_size[1] * row);
     }
 
   public:
+    static constexpr auto get_font_size() -> std::array<uint32_t, 2> {
+        return font_size;
+    }
+
     auto puts(const std::string_view str) -> void {
         for(const auto c : str) {
             if(c == '\n') {
@@ -58,7 +80,7 @@ class Console {
             line.data[column] = c;
             line.len += 1;
             if(column + 1 != columns) {
-                fb.write_ascii(calc_position(row, column), c, uint8_t(0xFF));
+                draw_ascii(calc_position(row, column), c, 0xFFFFFFFF);
                 column += 1;
             } else {
                 newline();
@@ -80,10 +102,14 @@ class Console {
         for(auto& l : buffer) {
             l.len = 0;
         }
+
+        resize_window(columns * font_size[0], rows * font_size[1]);
     }
 
-    Console(Framebuffer& fb) : fb(fb) {
-        buffer[0].len = 0;
+    auto refresh_buffer() -> void override {}
+
+    Console(const uint32_t rows, const uint32_t columns) {
+        resize(rows, columns);
     }
 };
 

@@ -15,6 +15,7 @@
 #include "segment.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
+#include "window-manager.hpp"
 
 enum class Message {
     XHCIInterrupt,
@@ -28,8 +29,7 @@ class Kernel {
     Framebuffer framebuffer;
 
     BitmapMemoryManager memory_manager;
-    Console             console;
-    MouseCursor         mousecursor;
+    MouseCursor*        mousecursor;
 
     usb::xhci::Controller* xhc;
 
@@ -37,8 +37,7 @@ class Kernel {
     ArrayQueue<Message>     main_queue = main_queue_data;
 
     auto mouse_observer(const int8_t displacement_x, const int8_t displacement_y) -> void {
-        mousecursor.move_relative(Point(displacement_x, displacement_y));
-        mousecursor.draw();
+        mousecursor->move_position(Point(displacement_x, displacement_y));
     }
 
     __attribute__((interrupt)) static auto int_hander_xhci(InterruptFrame* const frame) -> void {
@@ -67,16 +66,6 @@ class Kernel {
 
   public:
     auto run() -> void {
-        // set global objects
-        kernel      = this;
-        ::console   = &console;
-        ::allocator = &memory_manager;
-
-        // resize console
-        constexpr auto font_size = Framebuffer::get_font_size();
-        console.resize(framebuffer.get_size()[1] / font_size[1], framebuffer.get_size()[2] / font_size[0]);
-        logger(LogLevel::Debug, "klee\n");
-
         // setup segments
         setup_segments();
         set_dsall(0);
@@ -101,6 +90,19 @@ class Kernel {
         }
         memory_manager.set_range(FrameID(1), FrameID(available_end / bytes_per_frame));
         memory_manager.initialize_heap();
+
+        // set global objects
+        kernel        = this;
+        ::allocator   = &memory_manager;
+        ::framebuffer = &framebuffer;
+
+        const auto     window_manager = std::unique_ptr<WindowManager>(new WindowManager());
+        constexpr auto font_size      = Console::get_font_size();
+        const auto     fb_size        = framebuffer.get_size();
+        ::console                     = window_manager->open_window<Console>(fb_size[1] / font_size[1], fb_size[0] / font_size[0]);
+
+        // create mouse cursor
+        mousecursor = window_manager->open_window<MouseCursor>();
 
         // setup idt
         const auto cs = read_cs();
@@ -187,15 +189,14 @@ class Kernel {
                     logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
                 }
             }
+            window_manager->refresh();
             break;
         }
         goto loop;
     }
 
     Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) : memory_map(memory_map),
-                                                                                       framebuffer(framebuffer_config),
-                                                                                       console(framebuffer),
-                                                                                       mousecursor(framebuffer) {}
+                                                                                       framebuffer(framebuffer_config) {}
 };
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];
