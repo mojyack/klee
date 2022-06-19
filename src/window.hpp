@@ -120,6 +120,7 @@ class Window {
 
   public:
     virtual auto refresh_buffer() -> void = 0;
+    virtual auto is_grabbable(const Point point) const -> bool = 0;
 
     auto set_position(const Point new_pos) -> void {
         pos = new_pos;

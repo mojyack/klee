@@ -83,7 +83,13 @@ class Console : public Window {
         resize_window(columns * font_size[0], rows * font_size[1]);
     }
 
-    auto refresh_buffer() -> void override {}
+    auto refresh_buffer() -> void override {
+
+    }
+
+    auto is_grabbable(const Point point) const -> bool override {
+        return false;
+    }
 
     Console(const int width, const int height) : font_size(::get_font_size()) {
         resize(height / font_size[1], width / font_size[0]);

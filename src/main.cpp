@@ -31,14 +31,36 @@ class Kernel {
     BitmapMemoryManager memory_manager;
     FramebufferConfig   framebuffer_config;
     MouseCursor*        mousecursor;
+    WindowManager*      window_manager;
+    Window*             grubbed_window = nullptr;
+
+    // mouse click
+    Point prev_mouse_pos = {0, 0};
+    bool  left_pressed   = false;
+    bool  right_pressed  = false;
 
     usb::xhci::Controller* xhc;
 
     std::array<Message, 32> main_queue_data;
     ArrayQueue<Message>     main_queue = main_queue_data;
 
-    auto mouse_observer(const int8_t displacement_x, const int8_t displacement_y) -> void {
+    auto mouse_observer(const uint8_t buttons, const int8_t displacement_x, const int8_t displacement_y) -> void {
         mousecursor->move_position(Point(displacement_x, displacement_y));
+        if(grubbed_window != nullptr) {
+            grubbed_window->move_position(mousecursor->get_position() - prev_mouse_pos);
+        }
+
+        const auto left  = buttons & 0x01;
+        const auto right = buttons & 0x02;
+
+        prev_mouse_pos = mousecursor->get_position();
+        if(!left_pressed & left) {
+            grubbed_window = window_manager->try_grub(mousecursor->get_position());
+        } else if(left_pressed & !left) {
+            grubbed_window = nullptr;
+        }
+        left_pressed  = left;
+        right_pressed = right;
     }
 
     __attribute__((interrupt)) static auto int_hander_xhci(InterruptFrame* const frame) -> void {
@@ -93,11 +115,13 @@ class Kernel {
         memory_manager.initialize_heap();
 
         // set global objects
-        kernel      = this;
-        allocator   = &memory_manager;
-        framebuffer = new Framebuffer(framebuffer_config);
+        kernel        = this;
+        allocator     = &memory_manager;
+        const auto fb = std::unique_ptr<Framebuffer>(new Framebuffer(framebuffer_config));
+        framebuffer   = fb.get();
 
-        const auto window_manager    = std::unique_ptr<WindowManager>(new WindowManager());
+        const auto wm                = std::unique_ptr<WindowManager>(new WindowManager());
+        window_manager               = wm.get();
         const auto background_layer  = window_manager->create_layer();
         const auto appliction_layer  = window_manager->create_layer();
         const auto mousecursor_layer = window_manager->create_layer();
@@ -161,8 +185,8 @@ class Kernel {
         xhc.run();
 
         // connect usb devices
-        usb::HIDMouseDriver::default_observer = [this](int8_t displacement_x, int8_t displacement_y) -> void {
-            mouse_observer(displacement_x, displacement_y);
+        usb::HIDMouseDriver::default_observer = [this](uint8_t buttons, int8_t displacement_x, int8_t displacement_y) -> void {
+            mouse_observer(buttons, displacement_x, displacement_y);
         };
 
         for(auto i = 1; i <= xhc.get_max_ports(); i += 1) {

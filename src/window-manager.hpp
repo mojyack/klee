@@ -53,6 +53,15 @@ class Layer {
             }
         }
     }
+
+    auto try_grub(const Point point) const -> Window* {
+        for(auto& w : windows) {
+            if(w->is_grabbable(point - w->get_position())) {
+                return w.get();
+            }
+        }
+        return nullptr;
+    }
 };
 
 class WindowManager {
@@ -78,5 +87,15 @@ class WindowManager {
 
     auto refresh_layer(const size_t id) -> void {
         layers[id].refresh();
+    }
+
+    auto try_grub(const Point point) const -> Window* {
+        for(auto& l : layers) {
+            const auto w = l.try_grub(point);
+            if(w != nullptr) {
+                return w;
+            }
+        }
+        return nullptr;
     }
 };

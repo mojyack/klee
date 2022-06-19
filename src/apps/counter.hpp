@@ -9,7 +9,7 @@ class CounterApp : public StandardWindow {
         auto       buffer = std::array<char, 32>();
         const auto n      = snprintf(buffer.data(), buffer.size(), "count: %lu", count);
         draw_rect(origin, origin + Point(300, 100), 0x303030FF);
-        draw_string(origin, buffer.data(), 0xFFFFFFFF);
+        draw_string(origin + Point((300 - n * get_font_size()[0]) / 2, (100 - get_font_size()[1]) / 2), buffer.data(), 0xFFFFFFFF);
     }
 
   public:

@@ -36,6 +36,16 @@ class MouseCursor : public Window {
 
   public:
     auto refresh_buffer() -> void override {
+    }
+
+    auto is_grabbable(const Point point) const -> bool override {
+        return false;
+    }
+
+    MouseCursor() : Window(mousecursor_width, mousecursor_height) {
+        enable_alpha(true);
+        set_position_constraint(PositionConstraints::WithinScreen);
+
         for(auto y = 0; y < mousecursor_height; y += 1) {
             for(auto x = 0; x < mousecursor_width; x += 1) {
                 auto color = uint32_t();
@@ -52,10 +62,5 @@ class MouseCursor : public Window {
                 draw_pixel({x, y}, RGBAColor(color));
             }
         }
-    }
-
-    MouseCursor() : Window(mousecursor_width, mousecursor_height) {
-        enable_alpha(true);
-        set_position_constraint(PositionConstraints::WithinScreen);
     }
 };

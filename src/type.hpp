@@ -16,6 +16,15 @@ struct Point {
         return *this;
     }
 
+    auto operator-(const Point& o) const -> Point {
+        return {x - o.x, y - o.y};
+    }
+
+    auto operator-=(const Point& o) -> Point& {
+        *this = *this - o;
+        return *this;
+    }
+
     Point(const int x, const int y) : x(x), y(y) {}
 };
 
@@ -29,6 +38,10 @@ struct Rectangle {
 
     auto hight() const -> int {
         return b.y - a.y;
+    }
+
+    auto contains(const Point p) const -> bool {
+        return a.x <= p.x && b.x > p.x && a.y <= p.y && b.y > p.y;
     }
 };
 

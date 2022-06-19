@@ -28,10 +28,14 @@ class StandardWindow : public Window {
         // draw titlebar
         const auto font_size = get_font_size();
         draw_rect({border_pixel, border_pixel}, {size[0] - border_pixel, border_pixel + titlebar_height}, titlebar_color);
-        draw_string(Point(border_pixel + (size[0]-font_size[0] * title.size())/2, border_pixel + (titlebar_height - get_font_size()[1])/ 2), title, 0xFFFFFFFF);
+        draw_string(Point(border_pixel + (size[0] - font_size[0] * title.size()) / 2, border_pixel + (titlebar_height - get_font_size()[1]) / 2), title, 0xFFFFFFFF);
 
         // draw contents
         update_contents({border_pixel, border_pixel + titlebar_height});
+    }
+
+    auto is_grabbable(const Point point) const -> bool override {
+        return Rectangle{{border_pixel, border_pixel}, {get_size()[0] - border_pixel, border_pixel + titlebar_height}}.contains(point);
     }
 
     StandardWindow(const int width, const int height, std::string title) : Window(width + border_pixel * 2, height + titlebar_height + border_pixel * 2),

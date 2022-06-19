@@ -5,16 +5,16 @@
 namespace usb {
 class HIDMouseDriver : public HIDBaseDriver {
   private:
-    using ObserverType = void(int8_t displacement_x, int8_t displacement_y);
+    using ObserverType = void(uint8_t buttons, int8_t displacement_x, int8_t displacement_y);
 
     std::array<std::function<ObserverType>, 4> observers;
 
-    auto notify_mousemove(const int8_t displacement_x, const int8_t displacement_y) -> void {
+    auto notify_mousemove(const uint8_t buttons, const int8_t displacement_x, const int8_t displacement_y) -> void {
         for(const auto& o : observers) {
             if(!o) {
                 break;
             }
-            o(displacement_x, displacement_y);
+            o(buttons, displacement_x, displacement_y);
         }
     }
 
@@ -30,9 +30,10 @@ class HIDMouseDriver : public HIDBaseDriver {
     }
 
     auto on_data_received() -> Error override {
+        const auto buttons        = get_buffer()[0];
         const auto displacement_x = get_buffer()[1];
         const auto displacement_y = get_buffer()[2];
-        notify_mousemove(displacement_x, displacement_y);
+        notify_mousemove(buttons, displacement_x, displacement_y);
         return Error::Code::Success;
     }
 
