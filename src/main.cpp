@@ -1,5 +1,6 @@
 #include <array>
 #include <cstdio>
+#include <deque>
 
 #include "apps/counter.hpp"
 #include "asmcode.h"
@@ -12,7 +13,6 @@
 #include "paging.hpp"
 #include "pci.hpp"
 #include "print.hpp"
-#include "queue.hpp"
 #include "segment.hpp"
 #include "timer.hpp"
 #include "usb/classdriver/hid.hpp"
@@ -27,22 +27,17 @@ class Kernel {
   private:
     static inline Kernel* kernel;
 
-    MemoryMap           memory_map;
     BitmapMemoryManager memory_manager;
     FramebufferConfig   framebuffer_config;
     MouseCursor*        mousecursor;
     WindowManager*      window_manager;
     Window*             grubbed_window = nullptr;
+    std::deque<Message> main_queue     = std::deque<Message>(32);
 
     // mouse click
     Point prev_mouse_pos = {0, 0};
     bool  left_pressed   = false;
     bool  right_pressed  = false;
-
-    usb::xhci::Controller* xhc;
-
-    std::array<Message, 32> main_queue_data;
-    ArrayQueue<Message>     main_queue = main_queue_data;
 
     auto mouse_observer(const uint8_t buttons, const int8_t displacement_x, const int8_t displacement_y) -> void {
         mousecursor->move_position(Point(displacement_x, displacement_y));
@@ -64,7 +59,7 @@ class Kernel {
     }
 
     __attribute__((interrupt)) static auto int_hander_xhci(InterruptFrame* const frame) -> void {
-        kernel->main_queue.push(Message::XHCIInterrupt);
+        kernel->main_queue.push_back(Message::XHCIInterrupt);
         notify_end_of_interrupt();
     }
 
@@ -89,29 +84,11 @@ class Kernel {
 
   public:
     auto run() -> void {
-        // setup segments
+        // setup memory manager
         setup_segments();
         set_dsall(0);
         set_csss(1 << 3, 2 << 3);
         setup_identity_page_table();
-
-        // initialize allocator
-        const auto memory_map_base = reinterpret_cast<uintptr_t>(memory_map.buffer);
-        auto       available_end   = uintptr_t(0);
-        for(auto iter = memory_map_base; iter < memory_map_base + memory_map.map_size; iter += memory_map.descriptor_size) {
-            const auto& desc = *reinterpret_cast<MemoryDescriptor*>(iter);
-            if(available_end < desc.physical_start) {
-                memory_manager.set_bits(FrameID(available_end / bytes_per_frame), (desc.physical_start - available_end) / bytes_per_frame, true);
-            }
-
-            const auto physical_end = desc.physical_start + desc.number_of_pages * uefi_page_size;
-            if(is_available_memory_type(static_cast<MemoryType>(desc.type))) {
-                available_end = physical_end;
-            } else {
-                memory_manager.set_bits(FrameID(desc.physical_start / bytes_per_frame), desc.number_of_pages * uefi_page_size / bytes_per_frame, true);
-            }
-        }
-        memory_manager.set_range(FrameID(1), FrameID(available_end / bytes_per_frame));
         memory_manager.initialize_heap();
 
         // set global objects
@@ -177,7 +154,6 @@ class Kernel {
 
         const auto xhc_mmio_base = xhc_bar.as_value() & ~static_cast<uint64_t>(0x0F);
         auto       xhc           = usb::xhci::Controller(xhc_mmio_base);
-        this->xhc                = &xhc;
         if(xhc_dev->read_vender_id() == 0x8086) {
             switch_ehci_to_xhci(pci, *xhc_dev);
         }
@@ -207,18 +183,18 @@ class Kernel {
         window_manager->refresh();
         framebuffer->swap();
         __asm__("cli");
-        if(main_queue.is_empty()) {
+        if(main_queue.empty()) {
             __asm__("sti");
             goto loop;
         }
-        const auto message = main_queue.get_front();
-        main_queue.pop();
+        const auto message = main_queue.front();
+        main_queue.pop_front();
         __asm__("sti");
 
         switch(message) {
         case Message::XHCIInterrupt:
-            while(kernel->xhc->has_unprocessed_event()) {
-                if(const auto error = kernel->xhc->process_event()) {
+            while(xhc.has_unprocessed_event()) {
+                if(const auto error = xhc.process_event()) {
                     logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
                 }
             }
@@ -227,7 +203,7 @@ class Kernel {
         goto loop;
     }
 
-    Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) : memory_map(memory_map),
+    Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) : memory_manager(memory_map),
                                                                                        framebuffer_config(framebuffer_config) {}
 };
 

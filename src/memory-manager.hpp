@@ -4,6 +4,7 @@
 
 #include "error.hpp"
 #include "libc-support.hpp"
+#include "memory-map.h"
 
 #define MM_DEBUG_PRINT 0
 #if MM_DEBUG_PRINT == 1
@@ -70,13 +71,18 @@ class BitmapMemoryManager {
         }
     }
 
-  public:
     auto set_bits(const FrameID begin, const size_t frames, const bool flag) -> void {
         for(auto i = size_t(0); i < frames; i += 1) {
             set_bit(FrameID(begin.get_id() + i), flag);
         }
     }
 
+    auto set_range(const FrameID begin, const FrameID end) -> void {
+        range_begin = begin;
+        range_end   = end;
+    }
+
+  public:
     auto allocate(const size_t frames) -> Result<FrameID> {
         auto start_frame_id = range_begin.get_id();
     loop:
@@ -101,11 +107,6 @@ class BitmapMemoryManager {
     auto deallocate(const FrameID begin, const size_t frames) -> Error {
         set_bits(begin, frames, false);
         return Error::Code::Success;
-    }
-
-    auto set_range(const FrameID begin, const FrameID end) -> void {
-        range_begin = begin;
-        range_end   = end;
     }
 
     auto initialize_heap() -> Error {
@@ -135,6 +136,25 @@ class BitmapMemoryManager {
         }
     }
 #endif
+
+    BitmapMemoryManager(const MemoryMap& memory_map) {
+        const auto memory_map_base = reinterpret_cast<uintptr_t>(memory_map.buffer);
+        auto       available_end   = uintptr_t(0);
+        for(auto iter = memory_map_base; iter < memory_map_base + memory_map.map_size; iter += memory_map.descriptor_size) {
+            const auto& desc = *reinterpret_cast<MemoryDescriptor*>(iter);
+            if(available_end < desc.physical_start) {
+                set_bits(FrameID(available_end / bytes_per_frame), (desc.physical_start - available_end) / bytes_per_frame, true);
+            }
+
+            const auto physical_end = desc.physical_start + desc.number_of_pages * uefi_page_size;
+            if(is_available_memory_type(static_cast<MemoryType>(desc.type))) {
+                available_end = physical_end;
+            } else {
+                set_bits(FrameID(desc.physical_start / bytes_per_frame), desc.number_of_pages * uefi_page_size / bytes_per_frame, true);
+            }
+        }
+        set_range(FrameID(1), FrameID(available_end / bytes_per_frame));
+    }
 };
 
 inline auto allocator = (BitmapMemoryManager*)(nullptr);
