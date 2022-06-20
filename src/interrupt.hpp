@@ -1,9 +1,26 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <deque>
 
+#include "asmcode.h"
 #include "x86-descriptor.hpp"
 
+namespace interrupt {
+enum class Message {
+    XHCIInterrupt,
+    LAPICTimer,
+};
+
+class InterruptVector {
+  public:
+    enum Number {
+        XHCI       = 0x40,
+        LAPICTimer = 0x41,
+    };
+};
+
+namespace internal {
 union InterruptDescriptorAttribute {
     uint16_t data;
     struct {
@@ -25,13 +42,6 @@ struct InterruptDescriptor {
     uint32_t                     reserved;
 } __attribute__((packed));
 
-class InterruptVector {
-  public:
-    enum Number {
-        XHCI = 0x40,
-    };
-};
-
 struct InterruptFrame {
     uint64_t rip;
     uint64_t cs;
@@ -51,7 +61,9 @@ constexpr auto make_idt_attr(const DescriptorType type, const uint8_t descriptor
     return attr;
 }
 
-inline auto set_idt_entry(InterruptDescriptor& desc, const InterruptDescriptorAttribute attr, const uint64_t offset, const uint16_t segment_selector) -> void {
+inline auto set_idt_entry(InterruptVector::Number index, const InterruptDescriptorAttribute attr, const uint64_t offset, const uint16_t segment_selector) -> void {
+    auto& desc = idt[index];
+
     desc.attr             = attr;
     desc.offset_low       = offset & 0xFFFFu;
     desc.offset_middle    = (offset >> 16) & 0xFFFFu;
@@ -64,3 +76,26 @@ __attribute__((no_caller_saved_registers)) inline auto notify_end_of_interrupt()
 
     *end_of_interrupt = 0;
 }
+
+inline auto main_queue = (std::deque<Message>*)(nullptr);
+
+__attribute__((interrupt)) static auto int_handler_xhci(InterruptFrame* const frame) -> void {
+    main_queue->push_back(Message::XHCIInterrupt);
+    notify_end_of_interrupt();
+}
+
+__attribute__((interrupt)) static auto int_handler_lapic_timer(InterruptFrame* const frame) -> void {
+    main_queue->push_back(Message::LAPICTimer);
+    notify_end_of_interrupt();
+}
+
+} // namespace internal
+inline auto initialize_interrupt(std::deque<Message>& main_queue) -> void {
+    internal::main_queue = &main_queue;
+
+    const auto cs = read_cs();
+    set_idt_entry(InterruptVector::XHCI, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_xhci), cs);
+    set_idt_entry(InterruptVector::LAPICTimer, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_lapic_timer), cs);
+    load_idt(sizeof(internal::idt) - 1, reinterpret_cast<uintptr_t>(&internal::idt[0]));
+}
+} // namespace interrupt

@@ -1,6 +1,5 @@
 #include <array>
 #include <cstdio>
-#include <deque>
 
 #include "apps/counter.hpp"
 #include "asmcode.h"
@@ -19,20 +18,14 @@
 #include "usb/xhci/xhci.hpp"
 #include "window-manager.hpp"
 
-enum class Message {
-    XHCIInterrupt,
-};
-
 class Kernel {
   private:
-    static inline Kernel* kernel;
-
-    BitmapMemoryManager memory_manager;
-    FramebufferConfig   framebuffer_config;
-    MouseCursor*        mousecursor;
-    WindowManager*      window_manager;
-    Window*             grubbed_window = nullptr;
-    std::deque<Message> main_queue     = std::deque<Message>(32);
+    BitmapMemoryManager            memory_manager;
+    FramebufferConfig              framebuffer_config;
+    MouseCursor*                   mousecursor;
+    WindowManager*                 window_manager;
+    Window*                        grubbed_window = nullptr;
+    std::deque<interrupt::Message> main_queue     = std::deque<interrupt::Message>(32);
 
     // mouse click
     Point prev_mouse_pos = {0, 0};
@@ -56,11 +49,6 @@ class Kernel {
         }
         left_pressed  = left;
         right_pressed = right;
-    }
-
-    __attribute__((interrupt)) static auto int_hander_xhci(InterruptFrame* const frame) -> void {
-        kernel->main_queue.push_back(Message::XHCIInterrupt);
-        notify_end_of_interrupt();
     }
 
     static auto switch_ehci_to_xhci(const pci::Devices& pci, const pci::Device& xhc_dev) -> void {
@@ -92,7 +80,6 @@ class Kernel {
         memory_manager.initialize_heap();
 
         // set global objects
-        kernel        = this;
         allocator     = &memory_manager;
         const auto fb = std::unique_ptr<Framebuffer>(new Framebuffer(framebuffer_config));
         framebuffer   = fb.get();
@@ -108,10 +95,8 @@ class Kernel {
         // create mouse cursor
         mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
 
-        // setup idt
-        const auto cs = read_cs();
-        set_idt_entry(idt[InterruptVector::Number::XHCI], make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(int_hander_xhci), cs);
-        load_idt(sizeof(idt) - 1, reinterpret_cast<uintptr_t>(&idt[0]));
+        // initialize idt
+        initialize_interrupt(main_queue);
 
         // scan pci devices
         auto       pci              = pci::Devices();
@@ -133,7 +118,7 @@ class Kernel {
         }
         logger(LogLevel::Debug, "pci bus scan result: %s\n", error.to_str());
         const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
-        xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, InterruptVector::Number::XHCI, 0);
+        xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::InterruptVector::Number::XHCI, 0);
 
         // find mmio address of xhc device
         const auto xhc_bar = xhc_dev->read_bar(0);
@@ -178,6 +163,9 @@ class Kernel {
         // open counter app
         const auto counter_app = window_manager->get_layer(appliction_layer).open_window<CounterApp>();
 
+        // start timre
+        timer::initialize_timer();
+
     loop:
         counter_app->increment();
         window_manager->refresh();
@@ -192,12 +180,15 @@ class Kernel {
         __asm__("sti");
 
         switch(message) {
-        case Message::XHCIInterrupt:
+        case interrupt::Message::XHCIInterrupt:
             while(xhc.has_unprocessed_event()) {
                 if(const auto error = xhc.process_event()) {
                     logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
                 }
             }
+            break;
+        case interrupt::Message::LAPICTimer:
+            printk("interrupt\n");
             break;
         }
         goto loop;
