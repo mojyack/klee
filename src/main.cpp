@@ -167,12 +167,9 @@ class Kernel {
         timer::initialize_timer();
 
     loop:
-        counter_app->increment();
-        window_manager->refresh();
-        framebuffer->swap();
         __asm__("cli");
         if(main_queue.empty()) {
-            __asm__("sti");
+            __asm__("sti\n\thlt");
             goto loop;
         }
         const auto message = main_queue.front();
@@ -186,9 +183,13 @@ class Kernel {
                     logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
                 }
             }
+            window_manager->refresh();
+            framebuffer->swap();
             break;
         case interrupt::Message::LAPICTimer:
-            printk("interrupt\n");
+            counter_app->increment();
+            window_manager->refresh();
+            framebuffer->swap();
             break;
         }
         goto loop;
