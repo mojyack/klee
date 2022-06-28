@@ -55,7 +55,7 @@ class BitmapMemoryManager {
   private:
     using MaplineType = uint64_t;
 
-    static constexpr auto max_physical_memory_bytes = 128_GiB;
+    static constexpr auto max_physical_memory_bytes = 32_GiB;
     static constexpr auto required_frames           = max_physical_memory_bytes / bytes_per_frame;
     static constexpr auto bits_per_mapline          = 8 * sizeof(MaplineType);
 

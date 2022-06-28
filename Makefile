@@ -3,7 +3,7 @@ LLVM_VERSION = 14.0.4
 TARGET = x86_64-elf
 INCLUDES = -I${BUILDENV}/include -I${BUILDENV}/include/freetype2 -I${BUILDENV}/include/c++/v1 -I$(abspath edk2/MdePkg/Include) -I$(abspath edk2/MdePkg/Include/X64)
 COMMON_FLAGS = -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
-CXX = clang++ -O3 -Wall -ffreestanding -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 -Wno-address-of-packed-member --target=${TARGET} ${INCLUDES} ${COMMON_FLAGS} -c
+CXX = clang++ -O3 -Wall -ffreestanding -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 -Wno-address-of-packed-member -march=x86-64-v2 --target=${TARGET} ${INCLUDES} ${COMMON_FLAGS} -c
 LIBRARY = ${BUILDENV}/lib
 
 ifndef BUILDENV
@@ -83,15 +83,16 @@ run_debug: run_prep
 	-machine type=q35,accel=kvm \
 	-bios ovmf/OVMF.fd \
 	-cpu host,kvm=off \
-	-display sdl,gl=on \
+	-display sdl \
 	-enable-kvm \
 	-m 512M \
 	-boot order=c \
+	-device virtio-gpu,xres=1280,yres=1024 \
 	-drive file=out/volume,index=0,media=disk,format=raw \
 	-device qemu-xhci \
 	-device usb-mouse -device usb-kbd \
 	-nic none \
-	-gdb tcp::8080 -S &
+	-gdb tcp::8080 -S & \
 	lldb out/kernel.elf
 
 clean:

@@ -225,7 +225,8 @@ class Kernel {
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];
 
-auto kernel_instance_buffer = std::array<uint8_t, sizeof(Kernel)>();
+auto kernel_instance_buffer = std::array<uint8_t, sizeof(Kernel)>();  // max 4096 * 0x700 (Qemu)
+static_assert(sizeof(Kernel) <= 4096 * 0x700, "the kernel size overs buffer size");
 
 extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferConfig& framebuffer_config_ref) {
     new(kernel_instance_buffer.data()) Kernel(memory_map_ref, framebuffer_config_ref);
