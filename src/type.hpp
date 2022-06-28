@@ -50,6 +50,14 @@ struct RGBColor {
     uint8_t g;
     uint8_t b;
 
+    auto pack() const -> uint32_t {
+#if COLOR_RGB == 1
+        return r << 16 | g << 8 | b;
+#else
+        return b << 16 | g << 8 | r;
+#endif
+    }
+
     RGBColor(const uint8_t r, const uint8_t g, const uint8_t b) : r(r), g(g), b(b) {}
     RGBColor(const int32_t color) : r((color >> 16) & 0xFF), g((color >> 8) & 0xFF), b((color >> 0) & 0xFF) {}
 };

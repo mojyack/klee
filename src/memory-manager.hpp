@@ -38,6 +38,14 @@ class FrameID {
         return reinterpret_cast<void*>(id * bytes_per_frame);
     }
 
+    auto operator+(const size_t value) const -> FrameID {
+        return FrameID(id + value);
+    }
+
+    auto operator!=(const FrameID& o) const -> bool {
+        return id != o.id;
+    }
+
     explicit FrameID(const size_t id) : id(id) {}
 };
 
@@ -157,6 +165,44 @@ class BitmapMemoryManager {
     }
 };
 
+#undef MM_DEBUG_PRINT
+
 inline auto allocator = (BitmapMemoryManager*)(nullptr);
 
-#undef MM_DEBUG_PRINT
+class SmartFrameID {
+  private:
+    FrameID id = nullframe;
+    size_t  frames;
+
+  public:
+    auto operator=(SmartFrameID&& o) -> SmartFrameID& {
+        if(id != nullframe) {
+            allocator->deallocate(id, frames);
+        }
+
+        id     = o.id;
+        frames = o.frames;
+        o.id   = nullframe;
+        return *this;
+    }
+
+    auto operator->() -> FrameID* {
+        return &id;
+    }
+
+    auto operator*() -> FrameID {
+        return id;
+    }
+
+    SmartFrameID(SmartFrameID&& o) {
+        *this = std::move(o);
+    }
+
+    SmartFrameID() = default;
+    SmartFrameID(const FrameID id, const size_t frames) : id(id), frames(frames) {}
+    ~SmartFrameID() {
+        if(id != nullframe) {
+            allocator->deallocate(id, frames);
+        }
+    }
+};

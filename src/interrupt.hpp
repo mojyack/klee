@@ -10,13 +10,17 @@ namespace interrupt {
 enum class Message {
     XHCIInterrupt,
     LAPICTimer,
+    VirtIOGPUControl,
+    VirtIOGPUCursor,
 };
 
 class InterruptVector {
   public:
     enum Number {
-        XHCI       = 0x40,
-        LAPICTimer = 0x41,
+        XHCI = 0x40,
+        LAPICTimer,
+        VirtIOGPUControl,
+        VirtIOGPUCursor,
     };
 };
 
@@ -89,6 +93,16 @@ __attribute__((interrupt)) static auto int_handler_lapic_timer(InterruptFrame* c
     notify_end_of_interrupt();
 }
 
+__attribute__((interrupt)) static auto int_handler_virtio_gpu_control(InterruptFrame* const frame) -> void {
+    main_queue->push_back(Message::VirtIOGPUControl);
+    notify_end_of_interrupt();
+}
+
+__attribute__((interrupt)) static auto int_handler_virtio_gpu_cursor(InterruptFrame* const frame) -> void {
+    main_queue->push_back(Message::VirtIOGPUCursor);
+    notify_end_of_interrupt();
+}
+
 } // namespace internal
 inline auto initialize_interrupt(std::deque<Message>& main_queue) -> void {
     internal::main_queue = &main_queue;
@@ -96,6 +110,8 @@ inline auto initialize_interrupt(std::deque<Message>& main_queue) -> void {
     const auto cs = read_cs();
     set_idt_entry(InterruptVector::XHCI, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_xhci), cs);
     set_idt_entry(InterruptVector::LAPICTimer, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_lapic_timer), cs);
+    set_idt_entry(InterruptVector::VirtIOGPUControl, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_virtio_gpu_control), cs);
+    set_idt_entry(InterruptVector::VirtIOGPUCursor, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_virtio_gpu_cursor), cs);
     load_idt(sizeof(internal::idt) - 1, reinterpret_cast<uintptr_t>(&internal::idt[0]));
 }
 } // namespace interrupt

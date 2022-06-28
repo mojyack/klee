@@ -3,12 +3,10 @@
 
 #include "asmcode.h"
 #include "error.hpp"
+#include "io.hpp"
 
 namespace pci {
 namespace internal {
-static constexpr auto config_address = 0x0CF8;
-static constexpr auto config_data    = 0x0CFC;
-
 static auto make_address(const uint8_t bus, const uint8_t device, const uint8_t function, const uint8_t reg_addr) -> uint32_t {
     return 1 << 31 | // enable bit
            bus << 16 |
@@ -35,18 +33,6 @@ struct ClassCode {
         return match(base, sub) && this->interface == interface;
     }
 };
-
-inline auto write_address(const uint32_t address) -> void {
-    io_set32(internal::config_address, address);
-}
-
-inline auto write_data(const uint32_t data) -> void {
-    io_set32(internal::config_data, data);
-}
-
-inline auto read_data() -> uint32_t {
-    return io_read32(internal::config_data);
-}
 
 inline auto read_vender_id(const uint8_t bus, const uint8_t device, const uint8_t function) -> uint16_t {
     write_address(internal::make_address(bus, device, function, 0x00));
@@ -242,8 +228,12 @@ struct Device {
         return Error::Code::Success;
     }
 
-    auto configure_msix_register(const uint8_t cap_addr, const uint32_t msg_addr, const uint32_t msg_data, const unsigned int num_vector_exponent) const -> Error {
-        auto       msix_cap  = read_msix_capability(cap_addr);
+    auto configure_msix_register(const uint8_t cap_addr, const uint32_t msg_addr, const uint32_t msg_data, const unsigned int entry_number) const -> Error {
+        auto msix_cap = read_msix_capability(cap_addr);
+        if(entry_number > msix_cap.header.bits.table_limit) {
+            return Error::Code::NoPCIMSI;
+        }
+
         const auto table_bar = read_bar(msix_cap.table.bits.bar_index);
         const auto pba_bar   = read_bar(msix_cap.pba.bits.bar_index);
         if(!table_bar || !pba_bar) {
@@ -253,11 +243,11 @@ struct Device {
         const auto table_addr = (table_bar.as_value() & ~static_cast<uint64_t>(0x0F)) + (msix_cap.table.bits.offset << 3);
         // const auto pba_addr   = (pba_bar.as_value() & ~static_cast<uint64_t>(0x0F)) + (msix_cap.pba.bits.offset << 3);
 
-        const auto table        = reinterpret_cast<MSIXTable*>(table_addr);
-        table[0].msg_addr       = msg_addr;
-        table[0].msg_upper_addr = 0;
-        table[0].msg_data       = msg_data;
-        table[0].vector         = 0;
+        const auto table                   = reinterpret_cast<MSIXTable*>(table_addr);
+        table[entry_number].msg_addr       = msg_addr;
+        table[entry_number].msg_upper_addr = 0;
+        table[entry_number].msg_data       = msg_data;
+        table[entry_number].vector         = 0;
 
         msix_cap.header.bits.msix_enable = 1;
         write_msix_capability(cap_addr, msix_cap);
@@ -314,24 +304,28 @@ struct Device {
     }
 
     auto configure_msi(const uint32_t msg_addr, uint32_t msg_data, const unsigned int num_vector_exponent) const -> Error {
-        auto cap_addr      = read_register(0x34) & 0xFFu;
-        auto msi_cap_addr  = 0;
-        auto msix_cap_addr = 0;
+        auto cap_addr = read_register(0x34) & 0xFFu;
         while(cap_addr != 0) {
             const auto header = read_capability_header(cap_addr);
             if(header.bits.cap_id == capability_msi) {
-                msi_cap_addr = cap_addr;
-            } else if(header.bits.cap_id == capability_msix) {
-                msix_cap_addr = cap_addr;
+                return configure_msi_register(cap_addr, msg_addr, msg_data, num_vector_exponent);
             }
             cap_addr = header.bits.next_ptr;
         }
 
-        if(msi_cap_addr) {
-            return configure_msi_register(msi_cap_addr, msg_addr, msg_data, num_vector_exponent);
-        } else if(msix_cap_addr) {
-            return configure_msix_register(msix_cap_addr, msg_addr, msg_data, num_vector_exponent);
+        return Error::Code::NoPCIMSI;
+    }
+
+    auto configure_msix(const uint32_t msg_addr, uint32_t msg_data, const unsigned int entry_number) const -> Error {
+        auto cap_addr = read_register(0x34) & 0xFFu;
+        while(cap_addr != 0) {
+            const auto header = read_capability_header(cap_addr);
+            if(header.bits.cap_id == capability_msix) {
+                return configure_msix_register(cap_addr, msg_addr, msg_data, entry_number);
+            }
+            cap_addr = header.bits.next_ptr;
         }
+
         return Error::Code::NoPCIMSI;
     }
 
@@ -342,6 +336,15 @@ struct Device {
             msg_data |= 0xC000;
         }
         return configure_msi(msg_addr, msg_data, num_vector_exponent);
+    }
+
+    auto configure_msix_fixed_destination(const uint8_t apic_id, const MSITriggerMode trigger_mode, const MSIDeliveryMode delivery_mode, const uint8_t vector, const unsigned int entry_number) const -> Error {
+        const auto msg_addr = 0xFEE00000u | (apic_id << 12);
+        auto       msg_data = (static_cast<uint32_t>(delivery_mode) << 8) | vector;
+        if(trigger_mode == MSITriggerMode::Level) {
+            msg_data |= 0xC000;
+        }
+        return configure_msix(msg_addr, msg_data, entry_number);
     }
 };
 

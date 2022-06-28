@@ -16,7 +16,9 @@
 #include "timer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
+#include "virtio/gpu.hpp"
 #include "window-manager.hpp"
+#include "uefi/gop-framebuffer.hpp"
 
 class Kernel {
   private:
@@ -81,16 +83,16 @@ class Kernel {
 
         // set global objects
         allocator     = &memory_manager;
-        const auto fb = std::unique_ptr<Framebuffer>(new Framebuffer(framebuffer_config));
+        const auto fb = std::unique_ptr<Framebuffer>(new uefi::Framebuffer(framebuffer_config));
         framebuffer   = fb.get();
 
-        const auto wm                = std::unique_ptr<WindowManager>(new WindowManager());
-        window_manager               = wm.get();
-        const auto background_layer  = window_manager->create_layer();
+        const auto wm               = std::unique_ptr<WindowManager>(new WindowManager());
+        window_manager              = wm.get();
+        const auto background_layer = window_manager->create_layer();
         const auto appliction_layer  = window_manager->create_layer();
         const auto mousecursor_layer = window_manager->create_layer();
-        const auto fb_size           = framebuffer->get_size();
-        ::console                    = window_manager->get_layer(background_layer).open_window<Console>(fb_size[0], fb_size[1]);
+        const auto fb_size = framebuffer->get_size();
+        ::console          = window_manager->get_layer(background_layer).open_window<Console>(fb_size[0], fb_size[1]);
 
         // create mouse cursor
         mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
@@ -103,22 +105,28 @@ class Kernel {
         const auto error            = pci.scan_all_bus();
         const auto& [size, devices] = pci.get_devices();
 
-        // find xhc device
-        auto xhc_dev = (const pci::Device*)(nullptr);
+        // find devices
+        auto xhc_dev    = (const pci::Device*)(nullptr);
+        auto virtio_gpu = (const pci::Device*)(nullptr);
         for(auto i = size_t(0); i < size; i += 1) {
             const auto& dev       = devices[i];
-            const auto  vendor_id = pci::read_vender_id(dev.bus, dev.device, dev.function);
+            const auto  vendor_id = dev.read_vender_id();
             logger(LogLevel::Debug, "%d.%d.%d: vend %04x, class %08x, head %02x\n", dev.bus, dev.device, dev.function, vendor_id, dev.class_code, dev.header_type);
 
             if(dev.class_code.match(0x0Cu, 0x03u, 0x30u)) {
                 if(xhc_dev == nullptr || (xhc_dev->read_vender_id() != 0x8086 && vendor_id == 0x8086)) {
                     xhc_dev = &dev;
                 }
+            } else if(dev.read_vender_id() == 0x1AF4 && pci::read_device_id(dev.bus, dev.device, dev.function) == (0x1040 + 16)) {
+                virtio_gpu = &dev;
             }
         }
         logger(LogLevel::Debug, "pci bus scan result: %s\n", error.to_str());
         const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
-        xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::InterruptVector::Number::XHCI, 0);
+        if(xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::InterruptVector::Number::XHCI, 0) &&
+           xhc_dev->configure_msix_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::InterruptVector::Number::XHCI, 0)) {
+            logger(LogLevel::Error, "failed to configure msi for xHC device");
+        }
 
         // find mmio address of xhc device
         const auto xhc_bar = xhc_dev->read_bar(0);
@@ -160,11 +168,21 @@ class Kernel {
             }
         }
 
+        auto gpu_device = std::optional<virtio::gpu::GPUDevice>();
+        if(virtio_gpu != nullptr) {
+            if(auto result = virtio::gpu::initialize(*virtio_gpu)) {
+                gpu_device.emplace(std::move(result.as_value()));
+            } else {
+                logger(LogLevel::Error, "failed to initilize virtio gpu: %s", result.as_error().to_str());
+            }
+        }
+
         // open counter app
         const auto counter_app = window_manager->get_layer(appliction_layer).open_window<CounterApp>();
 
         // start timre
         timer::initialize_timer();
+        printk("klee.\n");
 
     loop:
         __asm__("cli");
@@ -176,6 +194,7 @@ class Kernel {
         main_queue.pop_front();
         __asm__("sti");
 
+        counter_app->increment();
         switch(message) {
         case interrupt::Message::XHCIInterrupt:
             while(xhc.has_unprocessed_event()) {
@@ -190,6 +209,11 @@ class Kernel {
             counter_app->increment();
             window_manager->refresh();
             framebuffer->swap();
+            break;
+        case interrupt::Message::VirtIOGPUControl:
+            gpu_device->process_control_queue();
+            break;
+        case interrupt::Message::VirtIOGPUCursor:
             break;
         }
         goto loop;

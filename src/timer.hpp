@@ -29,7 +29,6 @@ class Timer {
 class TimerManager {
   private:
     std::priority_queue<Timer> timers;
-    volatile unsigned long     total_tick = 0;
 };
 
 namespace internal {
@@ -38,8 +37,8 @@ volatile inline const auto lvt_timer     = reinterpret_cast<uint32_t*>(0xFEE0032
 volatile inline const auto initial_count = reinterpret_cast<uint32_t*>(0xFEE00380);
 volatile inline const auto current_count = reinterpret_cast<uint32_t*>(0xFEE00390);
 volatile inline const auto divide_config = reinterpret_cast<uint32_t*>(0xFEE003E0);
-
 } // namespace internal
+
 inline auto start() -> void {
     *internal::initial_count = internal::count_max;
 }

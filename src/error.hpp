@@ -26,6 +26,9 @@ class Error {
         UnknownXHCISpeedID,
         NoWaiter,
         NoPCIMSI,
+        // virtio
+        VirtIOLegacyDevice,
+        VirtIODeviceNotReady,
         LastOfCode,
     };
 
@@ -52,6 +55,8 @@ class Error {
         "UnknownXHCISpeedID",
         "NoWaiter",
         "NoPCIMSI",
+        "VirtIOLegacyDevice",
+        "VirtIODeviceNotReady",
         "LastOfCode",
     };
 
@@ -93,5 +98,6 @@ class Result {
 
     Result(T&& data) : data(std::move(data)) {}
 
+    Result(const Error error) : data(error) {}
     Result(const Error::Code error) : data(error) {}
 };
