@@ -187,8 +187,9 @@ class Kernel {
         // open counter app
         const auto counter_app = window_manager->get_layer(appliction_layer).open_window<CounterApp>();
 
-        // start timre
+        // start timer
         timer::initialize_timer();
+        printk("timer %d\n", timer::lapic_timer_freq);
         printk("klee.\n");
 
     loop:
@@ -201,7 +202,6 @@ class Kernel {
         main_queue.pop_front();
         __asm__("sti");
 
-        counter_app->increment();
         switch(message) {
         case interrupt::Message::XHCIInterrupt:
             while(xhc.has_unprocessed_event()) {

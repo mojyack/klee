@@ -1,4 +1,5 @@
 #pragma once
+#include "io.hpp"
 #include "log.hpp"
 
 namespace acpi {
@@ -98,6 +99,26 @@ struct FADT {
 } __attribute__((packed));
 
 inline auto fadt = (const FADT*)(nullptr);
+
+inline auto wait_miliseconds(const uint64_t ms) -> void {
+    constexpr auto pm_timer_freq = 3579545;
+
+    const auto pm_timer_32 = bool((fadt->flags >> 8) & 1);
+    const auto start       = io_read32(fadt->pm_tmr_blk);
+    auto       end         = start + pm_timer_freq * ms / 1000;
+    if(!pm_timer_32) {
+        end &= 0x00ffffffu;
+    }
+
+    if(end < start) { // overflow
+        while(io_read32(fadt->pm_tmr_blk) >= start) {
+            //
+        }
+    }
+    while(io_read32(fadt->pm_tmr_blk) < end) {
+        //
+    }
+}
 
 inline auto initialize(RSDP& rsdp) -> bool {
     if(!rsdp.is_valid()) {
