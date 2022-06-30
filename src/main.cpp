@@ -195,8 +195,8 @@ class Kernel {
 
         task::kernel_task = &task::task_manager->get_current_task();
         task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
-        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
-        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
+        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer))).wakeup();
+        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer))).wakeup();
 
         printk("klee.\n");
         refresh();
@@ -224,9 +224,9 @@ class Kernel {
         case MessageType::Keyboard: {
             const auto& data = message->data.keyboard;
             if(data.ascii == 'w') {
-                task::task_manager->wakeup(2);
+                task::task_manager->wakeup(3);
             } else if(data.ascii == 's') {
-                task::task_manager->sleep(2);
+                task::task_manager->sleep(3);
             }
             printk("%c", data.ascii);
         } break;

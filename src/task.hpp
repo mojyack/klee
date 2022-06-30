@@ -8,6 +8,8 @@
 #include "error.hpp"
 #include "message.hpp"
 #include "segment.hpp"
+#include "util.hpp"
+#include "print.hpp"
 
 namespace task {
 struct TaskContext {
@@ -78,53 +80,140 @@ class Task {
     auto sleep() -> Task&;
     auto wakeup() -> Task&;
 
-    Task(uint64_t id) : id(id) {}
+    Task(const uint64_t id) : id(id) {}
 };
 
 class TaskManager {
   private:
-    std::vector<std::unique_ptr<Task>> tasks;
-    std::deque<Task*>                  running;
-    uint64_t                           last_id = 0;
+    constexpr static auto max_nice = 3;
 
-  public:
-    auto new_task() -> Task& {
-        last_id += 1;
-        return *tasks.emplace_back(new Task(last_id));
+    struct ManagedTask {
+        Task     task;
+        uint32_t nice    = max_nice / 2;
+        bool     running = false;
+
+        ManagedTask(const uint64_t id) : task(id) {}
+    };
+
+    std::vector<std::unique_ptr<ManagedTask>>          tasks;
+    std::array<std::deque<ManagedTask*>, max_nice + 1> running;
+    uint64_t                                           last_id      = 0;
+    int                                                current_nice = 0;
+    bool                                               nice_changed = false;
+
+    template <class T, class U>
+    void erase(T& c, const U& value) {
+        const auto it = std::remove(c.begin(), c.end(), value);
+        c.erase(it, c.end());
     }
 
-    auto switch_task(const bool sleep_current = false) -> void {
-        const auto current_task = running.front();
-        running.pop_front();
-        if(!sleep_current || running.empty()) {
-            running.push_back(current_task);
+    static auto idle_main(const uint64_t id, const int64_t data) -> void {
+        while(true) {
+            __asm__("hlt");
         }
-        const auto next_task = running.front();
+    }
 
-        if(next_task == current_task) {
+    auto change_nice_running(ManagedTask* const task, const int nice) -> void {
+        if(nice < 0 || nice == task->nice) {
             return;
         }
 
-        switch_context(&next_task->get_context(), &current_task->get_context());
+        if(task != running[current_nice].front()) {
+            // change level of other task
+            erase(running[task->nice], task);
+            running[nice].push_back(task);
+            task->nice = nice;
+            if(nice < current_nice) {
+                nice_changed = true;
+            }
+            return;
+        }
+
+        // change level myself
+        running[current_nice].pop_front();
+        running[nice].push_front(task);
+        task->nice   = nice;
+        current_nice = nice;
+        if(nice > current_nice) {
+            nice_changed = true;
+        }
     }
 
-    auto sleep(Task* const task) -> void {
-        const auto it = std::find(running.begin(), running.end(), task);
+    auto new_managed_task() -> ManagedTask& {
+        last_id += 1;
+        return *tasks.emplace_back(new ManagedTask(last_id));
+    }
 
-        if(it == running.begin()) {
+    auto sleep(ManagedTask* const task) -> void {
+        if(!task->running) {
+            return;
+        }
+        task->running = false;
+
+        if(task == running[current_nice].front()) {
             switch_task(true);
             return;
         }
 
-        if(it == running.end()) {
+        erase(running[task->nice], task);
+    }
+
+    auto wakeup(ManagedTask* const task, int nice) -> void {
+        if(task->running) {
+            change_nice_running(task, nice);
             return;
         }
 
-        running.erase(it);
+        nice          = nice >= 0 ? nice : task->nice;
+        task->nice    = nice;
+        task->running = true;
+
+        running[nice].push_back(task);
+        if(nice < current_nice) {
+            nice_changed = true;
+        }
+    }
+
+  public:
+    auto new_task() -> Task& {
+        return new_managed_task().task;
+    }
+
+    auto switch_task(const bool sleep_current = false) -> void {
+        auto&      nice_queue   = running[current_nice];
+        const auto current_task = nice_queue.front();
+        nice_queue.pop_front();
+
+        if(!sleep_current) {
+            nice_queue.push_back(current_task);
+        }
+
+        if(nice_queue.empty()) {
+            nice_changed = true;
+        }
+
+        if(nice_changed) {
+            nice_changed = false;
+            for(auto n = 0; n <= max_nice; n += 1) {
+                if(running[n].empty()) {
+                    continue;
+                }
+                current_nice = n;
+                break;
+            }
+        }
+
+        const auto next_task = running[current_nice].front();
+
+        switch_context(&next_task->task.get_context(), &current_task->task.get_context());
+    }
+
+    auto sleep(Task* const task) -> void {
+        sleep(container_of(task, &ManagedTask::task));
     }
 
     auto sleep(const uint64_t id) -> Error {
-        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->get_id() == id; });
+        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->task.get_id() == id; });
         if(it == tasks.end()) {
             return Error::Code::NoSuchTask;
         }
@@ -133,38 +222,44 @@ class TaskManager {
         return Error::Code::Success;
     }
 
-    auto wakeup(Task* const task) -> void {
-        const auto it = std::find(running.begin(), running.end(), task);
-        if(it == running.end()) {
-            running.push_back(task);
-        }
+    auto wakeup(Task* const task, const int nice = -1) -> void {
+        wakeup(container_of(task, &ManagedTask::task), nice);
     }
 
-    auto wakeup(const uint64_t id) -> Error {
-        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->get_id() == id; });
+    auto wakeup(const uint64_t id, const int nice = -1) -> Error {
+        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->task.get_id() == id; });
         if(it == tasks.end()) {
             return Error::Code::NoSuchTask;
         }
 
-        wakeup(it->get());
+        wakeup(it->get(), nice);
         return Error::Code::Success;
     }
 
     auto send_message(const uint64_t id, Message message) -> Error {
-        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->get_id() == id; });
+        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->task.get_id() == id; });
         if(it == tasks.end()) {
             return Error::Code::NoSuchTask;
         }
-        (*it)->send_message(std::move(message));
+        (*it)->task.send_message(std::move(message));
         return Error::Code::Success;
     }
 
     auto get_current_task() -> Task& {
-        return *running.front();
+        return running[current_nice].front()->task;
     }
 
     TaskManager() {
-        running.push_back(&new_task());
+        auto& task   = new_managed_task();
+        task.nice    = current_nice;
+        task.running = true;
+        running[current_nice].push_back(&task);
+
+        auto& idle = new_managed_task();
+        idle.task.init_context(idle_main, 0);
+        idle.nice    = max_nice;
+        idle.running = true;
+        running[max_nice].push_back(&idle);
     }
 };
 
