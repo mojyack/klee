@@ -4,16 +4,10 @@
 #include <deque>
 
 #include "asmcode.h"
+#include "message.hpp"
 #include "x86-descriptor.hpp"
 
 namespace interrupt {
-enum class Message {
-    XHCIInterrupt,
-    LAPICTimer,
-    VirtIOGPUControl,
-    VirtIOGPUCursor,
-};
-
 class InterruptVector {
   public:
     enum Number {
@@ -84,27 +78,27 @@ __attribute__((no_caller_saved_registers)) inline auto notify_end_of_interrupt()
 inline auto main_queue = (std::deque<Message>*)(nullptr);
 
 __attribute__((interrupt)) static auto int_handler_xhci(InterruptFrame* const frame) -> void {
-    main_queue->push_back(Message::XHCIInterrupt);
+    main_queue->push_back(MessageType::XHCIInterrupt);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_lapic_timer(InterruptFrame* const frame) -> void {
-    main_queue->push_back(Message::LAPICTimer);
+    main_queue->push_back(MessageType::LAPICTimer);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_control(InterruptFrame* const frame) -> void {
-    main_queue->push_back(Message::VirtIOGPUControl);
+    main_queue->push_back(MessageType::VirtIOGPUControl);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_cursor(InterruptFrame* const frame) -> void {
-    main_queue->push_back(Message::VirtIOGPUCursor);
+    main_queue->push_back(MessageType::VirtIOGPUCursor);
     notify_end_of_interrupt();
 }
 
 } // namespace internal
-inline auto initialize_interrupt(std::deque<Message>& main_queue) -> void {
+inline auto initialize(std::deque<Message>& main_queue) -> void {
     internal::main_queue = &main_queue;
 
     const auto cs = read_cs();

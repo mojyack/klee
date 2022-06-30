@@ -6,6 +6,7 @@
 #include "asmcode.h"
 #include "console.hpp"
 #include "interrupt.hpp"
+#include "keyboard.hpp"
 #include "log.hpp"
 #include "memory-manager.hpp"
 #include "memory-map.h"
@@ -23,13 +24,13 @@
 
 class Kernel {
   private:
-    BitmapMemoryManager            memory_manager;
-    FramebufferConfig              framebuffer_config;
-    acpi::RSDP&                    rsdp;
-    MouseCursor*                   mousecursor;
-    WindowManager*                 window_manager;
-    Window*                        grubbed_window = nullptr;
-    std::deque<interrupt::Message> main_queue     = std::deque<interrupt::Message>(32);
+    BitmapMemoryManager memory_manager;
+    FramebufferConfig   framebuffer_config;
+    acpi::RSDP&         rsdp;
+    MouseCursor*        mousecursor;
+    WindowManager*      window_manager;
+    Window*             grubbed_window = nullptr;
+    std::deque<Message> main_queue     = std::deque<Message>(32);
 
     // mouse click
     Point prev_mouse_pos = {0, 0};
@@ -102,7 +103,7 @@ class Kernel {
         }
 
         // initialize idt
-        initialize_interrupt(main_queue);
+        interrupt::initialize(main_queue);
 
         // scan pci devices
         auto       pci              = pci::Devices();
@@ -161,6 +162,7 @@ class Kernel {
         usb::HIDMouseDriver::default_observer = [this](uint8_t buttons, int8_t displacement_x, int8_t displacement_y) -> void {
             mouse_observer(buttons, displacement_x, displacement_y);
         };
+        keyboard::setup(main_queue);
 
         for(auto i = 1; i <= xhc.get_max_ports(); i += 1) {
             auto port = xhc.get_port_at(i);
@@ -189,7 +191,6 @@ class Kernel {
 
         // start timer
         timer::initialize_timer();
-        printk("timer %d\n", timer::lapic_timer_freq);
         printk("klee.\n");
 
     loop:
@@ -202,8 +203,8 @@ class Kernel {
         main_queue.pop_front();
         __asm__("sti");
 
-        switch(message) {
-        case interrupt::Message::XHCIInterrupt:
+        switch(message.type) {
+        case MessageType::XHCIInterrupt:
             while(xhc.has_unprocessed_event()) {
                 if(const auto error = xhc.process_event()) {
                     logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
@@ -212,15 +213,19 @@ class Kernel {
             window_manager->refresh();
             framebuffer->swap();
             break;
-        case interrupt::Message::LAPICTimer:
+        case MessageType::LAPICTimer:
             counter_app->increment();
             window_manager->refresh();
             framebuffer->swap();
             break;
-        case interrupt::Message::VirtIOGPUControl:
+        case MessageType::Keyboard: {
+            const auto& data = message.data.keyboard;
+            printk("%c", data.ascii);
+        } break;
+        case MessageType::VirtIOGPUControl:
             gpu_device->process_control_queue();
             break;
-        case interrupt::Message::VirtIOGPUCursor:
+        case MessageType::VirtIOGPUCursor:
             break;
         }
         goto loop;
@@ -228,7 +233,7 @@ class Kernel {
 
     Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config, acpi::RSDP& rsdp) : memory_manager(memory_map),
                                                                                                          framebuffer_config(framebuffer_config),
-    rsdp(rsdp){}
+                                                                                                         rsdp(rsdp) {}
 };
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];

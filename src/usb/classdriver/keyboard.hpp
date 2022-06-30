@@ -5,16 +5,16 @@
 namespace usb {
 class HIDKeyboardDriver : public HIDBaseDriver {
   private:
-    using ObserverType = void(uint8_t keycode);
+    using ObserverType = void(uint8_t modifier, uint8_t keycode);
 
     std::array<std::function<ObserverType>, 4> observers;
 
-    auto notify_keypush(const uint8_t keycode) -> void {
+    auto notify_keypush(const uint8_t modifier, const uint8_t keycode) -> void {
         for(const auto& o : observers) {
             if(!o) {
                 break;
             }
-            o(keycode);
+            o(modifier, keycode);
         }
     }
 
@@ -30,16 +30,16 @@ class HIDKeyboardDriver : public HIDBaseDriver {
     }
 
     auto on_data_received() -> Error override {
-        for(auto i = 2; i < 8; i += 8) {
+        for(auto i = 2; i < 8; i += 1) {
             const auto key = get_buffer()[i];
             if(key == 0) {
                 continue;
             }
             const auto& prev_buf = get_prev_buffer();
-            if(std::find(prev_buf.begin(), prev_buf.end(), key) != prev_buf.end()) {
+            if(std::find(prev_buf.begin() + 2, prev_buf.end(), key) != prev_buf.end()) {
                 continue;
             }
-            notify_keypush(key);
+            notify_keypush(get_buffer()[0], key);
         }
         return Error::Code::Success;
     }
