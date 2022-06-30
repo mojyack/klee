@@ -5,6 +5,7 @@
 #include "acpi.hpp"
 #include "interrupt-vector.hpp"
 #include "message.hpp"
+#include "task.hpp"
 
 namespace timer {
 enum Flags {
@@ -33,7 +34,6 @@ struct Timer {
 class TimerManager {
   private:
     uint64_t                   tick = 0;
-    std::deque<Message>&       main_queue;
     std::priority_queue<Timer> timers;
 
   public:
@@ -56,7 +56,7 @@ class TimerManager {
             } else {
                 auto m             = Message(MessageType::Timer);
                 m.data.timer.value = t.value;
-                main_queue.push_back(m);
+                task::kernel_task->send_message(m);
             }
         }
         return task_switch;
@@ -70,8 +70,6 @@ class TimerManager {
         timer.origin = tick;
         timers.push(timer);
     }
-
-    TimerManager(std::deque<Message>& main_queue) : main_queue(main_queue) {}
 };
 
 namespace internal {

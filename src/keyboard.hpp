@@ -2,6 +2,7 @@
 #include <deque>
 
 #include "message.hpp"
+#include "task.hpp"
 #include "usb/classdriver/keyboard.hpp"
 
 namespace keyboard {
@@ -51,13 +52,13 @@ enum Modifiers {
     RGUI     = 0b10000000u,
 };
 
-inline auto setup(std::deque<Message>& main_queue) -> void {
-    usb::HIDKeyboardDriver::default_observer = [&main_queue](const uint8_t modifier, const uint8_t keycode) -> void {
+inline auto setup() -> void {
+    usb::HIDKeyboardDriver::default_observer = [](const uint8_t modifier, const uint8_t keycode) -> void {
         const bool shift = (modifier & (Modifiers::LShift | Modifiers::RShift)) != 0;
 
         auto m          = Message(MessageType::Keyboard);
         m.data.keyboard = KeyboardData{keycode, modifier, !shift ? internal::ascii_table[keycode] : internal::ascii_table_shift[keycode]};
-        main_queue.push_back(m);
+        task::kernel_task->send_message(m);
     };
 }
 } // namespace keyboard

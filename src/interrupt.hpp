@@ -5,9 +5,9 @@
 
 #include "asmcode.h"
 #include "message.hpp"
-#include "x86-descriptor.hpp"
-#include "timer.hpp"
 #include "task.hpp"
+#include "timer.hpp"
+#include "x86-descriptor.hpp"
 
 namespace interrupt {
 namespace internal {
@@ -67,11 +67,10 @@ __attribute__((no_caller_saved_registers)) inline auto notify_end_of_interrupt()
     *end_of_interrupt = 0;
 }
 
-inline auto main_queue = (std::deque<Message>*)(nullptr);
 inline auto timer_manager = (timer::TimerManager*)(nullptr);
 
 __attribute__((interrupt)) static auto int_handler_xhci(InterruptFrame* const frame) -> void {
-    main_queue->push_back(MessageType::XHCIInterrupt);
+    task::kernel_task->send_message(MessageType::XHCIInterrupt);
     notify_end_of_interrupt();
 }
 
@@ -85,18 +84,17 @@ __attribute__((interrupt)) static auto int_handler_lapic_timer(InterruptFrame* c
 }
 
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_control(InterruptFrame* const frame) -> void {
-    main_queue->push_back(MessageType::VirtIOGPUControl);
+    task::kernel_task->send_message(MessageType::VirtIOGPUControl);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_cursor(InterruptFrame* const frame) -> void {
-    main_queue->push_back(MessageType::VirtIOGPUCursor);
+    task::kernel_task->send_message(MessageType::VirtIOGPUCursor);
     notify_end_of_interrupt();
 }
 
 } // namespace internal
-inline auto initialize(timer::TimerManager& timer_manager, std::deque<Message>& main_queue) -> void {
-    internal::main_queue = &main_queue;
+inline auto initialize(timer::TimerManager& timer_manager) -> void {
     internal::timer_manager = &timer_manager;
 
     const auto cs = read_cs();

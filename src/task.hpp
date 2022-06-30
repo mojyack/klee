@@ -1,10 +1,12 @@
 #pragma once
 #include <array>
 #include <deque>
+#include <optional>
 #include <vector>
 
 #include "asmcode.h"
 #include "error.hpp"
+#include "message.hpp"
 #include "segment.hpp"
 
 namespace task {
@@ -22,6 +24,7 @@ class Task {
   private:
     uint64_t              id;
     std::vector<uint64_t> stack;
+    std::deque<Message>   messages;
     alignas(16) TaskContext context;
 
   public:
@@ -52,9 +55,28 @@ class Task {
 
         return *this;
     }
+
     auto get_context() -> TaskContext& {
         return context;
     }
+
+    auto send_message(Message message) -> void {
+        messages.push_back(std::move(message));
+        wakeup();
+    }
+
+    auto receive_message() -> std::optional<Message> {
+        if(messages.empty()) {
+            return std::nullopt;
+        }
+
+        auto m = messages.front();
+        messages.pop_front();
+        return m;
+    }
+
+    auto sleep() -> Task&;
+    auto wakeup() -> Task&;
 
     Task(uint64_t id) : id(id) {}
 };
@@ -63,7 +85,7 @@ class TaskManager {
   private:
     std::vector<std::unique_ptr<Task>> tasks;
     std::deque<Task*>                  running;
-    uint64_t                           last_id            = 0;
+    uint64_t                           last_id = 0;
 
   public:
     auto new_task() -> Task& {
@@ -74,10 +96,14 @@ class TaskManager {
     auto switch_task(const bool sleep_current = false) -> void {
         const auto current_task = running.front();
         running.pop_front();
-        if(!sleep_current) {
+        if(!sleep_current || running.empty()) {
             running.push_back(current_task);
         }
         const auto next_task = running.front();
+
+        if(next_task == current_task) {
+            return;
+        }
 
         switch_context(&next_task->get_context(), &current_task->get_context());
     }
@@ -124,10 +150,34 @@ class TaskManager {
         return Error::Code::Success;
     }
 
+    auto send_message(const uint64_t id, Message message) -> Error {
+        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->get_id() == id; });
+        if(it == tasks.end()) {
+            return Error::Code::NoSuchTask;
+        }
+        (*it)->send_message(std::move(message));
+        return Error::Code::Success;
+    }
+
+    auto get_current_task() -> Task& {
+        return *running.front();
+    }
+
     TaskManager() {
         running.push_back(&new_task());
     }
 };
 
 inline auto task_manager = (TaskManager*)(nullptr);
+inline auto kernel_task  = (Task*)(nullptr);
+
+inline auto Task::sleep() -> Task& {
+    task_manager->sleep(this);
+    return *this;
+}
+
+inline auto Task::wakeup() -> Task& {
+    task_manager->wakeup(this);
+    return *this;
+}
 } // namespace task

@@ -24,11 +24,9 @@
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
 
-auto kernel_queue = (std::deque<Message>*)(nullptr);
-
 auto refresh() -> void {
     __asm__("cli");
-    kernel_queue->push_back(MessageType::RefreshScreen);
+    task::kernel_task->send_message(MessageType::RefreshScreen);
     __asm__("sti");
 }
 
@@ -50,7 +48,6 @@ class Kernel {
     MouseCursor*        mousecursor;
     WindowManager*      window_manager;
     Window*             grubbed_window = nullptr;
-    std::deque<Message> main_queue     = std::deque<Message>(32);
 
     // mouse click
     Point prev_mouse_pos = {0, 0};
@@ -105,14 +102,14 @@ class Kernel {
 
         // start timer
         timer::initialize_timer();
-        auto timer_manager = timer::TimerManager(main_queue);
+        auto timer_manager = timer::TimerManager();
 
         // create task manager
         auto tm            = task::TaskManager();
         task::task_manager = &tm;
 
         // initialize idt
-        interrupt::initialize(timer_manager, main_queue);
+        interrupt::initialize(timer_manager);
 
         // scan pci devices
         auto       pci              = pci::Devices();
@@ -168,8 +165,8 @@ class Kernel {
         xhc.run();
 
         // connect usb devices
-        mouse::setup(main_queue);
-        keyboard::setup(main_queue);
+        mouse::setup();
+        keyboard::setup();
 
         for(auto i = 1; i <= xhc.get_max_ports(); i += 1) {
             auto port = xhc.get_port_at(i);
@@ -196,7 +193,7 @@ class Kernel {
         // task switching timer
         timer_manager.add_timer({5, 0, timer::Flags::Periodic | timer::Flags::Task});
 
-        kernel_queue = &main_queue;
+        task::kernel_task = &task::task_manager->get_current_task();
         task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
         task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
         task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
@@ -206,15 +203,15 @@ class Kernel {
 
     loop:
         __asm__("cli");
-        if(main_queue.empty()) {
-            __asm__("sti\n\thlt");
+        const auto message = task::kernel_task->receive_message();
+        if(!message) {
+            task::kernel_task->sleep();
+            __asm__("sti");
             goto loop;
         }
-        const auto message = main_queue.front();
-        main_queue.pop_front();
         __asm__("sti");
 
-        switch(message.type) {
+        switch(message->type) {
         case MessageType::XHCIInterrupt:
             while(xhc.has_unprocessed_event()) {
                 if(const auto error = xhc.process_event()) {
@@ -225,7 +222,7 @@ class Kernel {
         case MessageType::Timer:
             break;
         case MessageType::Keyboard: {
-            const auto& data = message.data.keyboard;
+            const auto& data = message->data.keyboard;
             if(data.ascii == 'w') {
                 task::task_manager->wakeup(2);
             } else if(data.ascii == 's') {
@@ -234,7 +231,7 @@ class Kernel {
             printk("%c", data.ascii);
         } break;
         case MessageType::Mouse: {
-            const auto& data = message.data.mouse;
+            const auto& data = message->data.mouse;
             mousecursor->move_position(Point(data.displacement_x, data.displacement_y));
             if(grubbed_window != nullptr) {
                 grubbed_window->move_position(mousecursor->get_position() - prev_mouse_pos);
