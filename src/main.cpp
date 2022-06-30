@@ -25,6 +25,7 @@ class Kernel {
   private:
     BitmapMemoryManager            memory_manager;
     FramebufferConfig              framebuffer_config;
+    acpi::RSDP&                    rsdp;
     MouseCursor*                   mousecursor;
     WindowManager*                 window_manager;
     Window*                        grubbed_window = nullptr;
@@ -185,6 +186,9 @@ class Kernel {
         timer::initialize_timer();
         printk("klee.\n");
 
+        // initialize acpi
+        acpi::initialize(rsdp);
+
     loop:
         __asm__("cli");
         if(main_queue.empty()) {
@@ -221,9 +225,8 @@ class Kernel {
     }
 
     Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config, acpi::RSDP& rsdp) : memory_manager(memory_map),
-                                                                                                         framebuffer_config(framebuffer_config) {
-        acpi::initialize(rsdp);
-    }
+                                                                                                         framebuffer_config(framebuffer_config),
+    rsdp(rsdp){}
 };
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];

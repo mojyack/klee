@@ -30,7 +30,7 @@ struct RSDP {
     char     reserved[3];
 
     auto is_valid() const -> bool {
-        if(std::string_view(signature) != "RSD PTR ") {
+        if(std::strncmp(signature, "RSD PTR ", 8) != 0) {
             logger(LogLevel::Error, "invalid signature %.8s\n", signature);
             return false;
         }
@@ -50,11 +50,11 @@ struct RSDP {
     }
 } __attribute__((packed));
 
-inline auto initialize(RSDP& rsdp) -> void {
+inline auto initialize(RSDP& rsdp) -> bool {
     if(!rsdp.is_valid()) {
         logger(LogLevel::Error, "invalid RSDP");
-        return;
+        return false;
     }
-    return;
+    return true;
 }
 } // namespace acpi
