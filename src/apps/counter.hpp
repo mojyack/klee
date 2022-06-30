@@ -14,6 +14,7 @@ class CounterApp : public StandardWindow {
 
   public:
     auto increment() -> void {
+        dirty = true;
         count += 1;
     }
 

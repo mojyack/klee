@@ -13,10 +13,15 @@ class StandardWindow : public Window {
     std::string title;
 
   protected:
+    bool         dirty                                 = true;
     virtual auto update_contents(Point origin) -> void = 0;
 
   public:
     auto refresh_buffer() -> void final {
+        if(!dirty) {
+            return;
+        }
+
         const auto size = get_size();
 
         // draw border
