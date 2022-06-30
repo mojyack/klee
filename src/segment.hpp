@@ -1,7 +1,12 @@
+#pragma once
 #include <array>
 
 #include "asmcode.h"
 #include "x86-descriptor.hpp"
+
+constexpr auto kernel_cs = 1 << 3;
+constexpr auto kernel_ss = 2 << 3;
+constexpr auto kernel_ds = 0;
 
 union SegmentDescriptor {
     uint64_t data;

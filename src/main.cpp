@@ -10,17 +10,37 @@
 #include "log.hpp"
 #include "memory-manager.hpp"
 #include "memory-map.h"
+#include "mouse.hpp"
 #include "mousecursor.hpp"
 #include "paging.hpp"
 #include "pci.hpp"
 #include "print.hpp"
 #include "segment.hpp"
+#include "task.hpp"
 #include "timer.hpp"
 #include "uefi/gop-framebuffer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
+
+auto kernel_queue = (std::deque<Message>*)(nullptr);
+
+auto refresh() -> void {
+    __asm__("cli");
+    kernel_queue->push_back(MessageType::RefreshScreen);
+    __asm__("sti");
+}
+
+auto task_b_entry(const uint64_t id, const int64_t data) -> void {
+    auto& layer = *reinterpret_cast<Layer*>(data);
+    auto  app   = layer.open_window<CounterApp>();
+    while(true) {
+        __asm__("hlt");
+        app->increment();
+        refresh();
+    }
+}
 
 class Kernel {
   private:
@@ -36,25 +56,6 @@ class Kernel {
     Point prev_mouse_pos = {0, 0};
     bool  left_pressed   = false;
     bool  right_pressed  = false;
-
-    auto mouse_observer(const uint8_t buttons, const int8_t displacement_x, const int8_t displacement_y) -> void {
-        mousecursor->move_position(Point(displacement_x, displacement_y));
-        if(grubbed_window != nullptr) {
-            grubbed_window->move_position(mousecursor->get_position() - prev_mouse_pos);
-        }
-
-        const auto left  = buttons & 0x01;
-        const auto right = buttons & 0x02;
-
-        prev_mouse_pos = mousecursor->get_position();
-        if(!left_pressed & left) {
-            grubbed_window = window_manager->try_grub(mousecursor->get_position());
-        } else if(left_pressed & !left) {
-            grubbed_window = nullptr;
-        }
-        left_pressed  = left;
-        right_pressed = right;
-    }
 
     static auto switch_ehci_to_xhci(const pci::Devices& pci, const pci::Device& xhc_dev) -> void {
         auto intel_ehc_exist       = false;
@@ -79,8 +80,8 @@ class Kernel {
     auto run() -> void {
         // setup memory manager
         setup_segments();
-        set_dsall(0);
-        set_csss(1 << 3, 2 << 3);
+        set_dsall(kernel_ds);
+        set_csss(kernel_cs, kernel_ss);
         setup_identity_page_table();
         memory_manager.initialize_heap();
 
@@ -92,7 +93,7 @@ class Kernel {
         const auto wm                = std::unique_ptr<WindowManager>(new WindowManager());
         window_manager               = wm.get();
         const auto background_layer  = window_manager->create_layer();
-        const auto appliction_layer  = window_manager->create_layer();
+        const auto application_layer = window_manager->create_layer();
         const auto mousecursor_layer = window_manager->create_layer();
         const auto fb_size           = framebuffer->get_size();
         ::console                    = window_manager->get_layer(background_layer).open_window<Console>(fb_size[0], fb_size[1]);
@@ -102,8 +103,16 @@ class Kernel {
             return;
         }
 
+        // start timer
+        timer::initialize_timer();
+        auto timer_manager = timer::TimerManager(main_queue);
+
+        // create task manager
+        auto tm            = task::TaskManager();
+        task::task_manager = &tm;
+
         // initialize idt
-        interrupt::initialize(main_queue);
+        interrupt::initialize(timer_manager, main_queue);
 
         // scan pci devices
         auto       pci              = pci::Devices();
@@ -159,9 +168,7 @@ class Kernel {
         xhc.run();
 
         // connect usb devices
-        usb::HIDMouseDriver::default_observer = [this](uint8_t buttons, int8_t displacement_x, int8_t displacement_y) -> void {
-            mouse_observer(buttons, displacement_x, displacement_y);
-        };
+        mouse::setup(main_queue);
         keyboard::setup(main_queue);
 
         for(auto i = 1; i <= xhc.get_max_ports(); i += 1) {
@@ -186,12 +193,13 @@ class Kernel {
         // create mouse cursor
         mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
 
-        // open counter app
-        const auto counter_app = window_manager->get_layer(appliction_layer).open_window<CounterApp>();
+        // task switching timer
+        timer_manager.add_timer({5, 0, timer::Flags::Periodic | timer::Flags::Task});
 
-        // start timer
-        timer::initialize_timer();
-        printk("klee.\n");
+        kernel_queue = &main_queue;
+        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
+        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
+        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
 
     loop:
         __asm__("cli");
@@ -210,18 +218,38 @@ class Kernel {
                     logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
                 }
             }
-            window_manager->refresh();
-            framebuffer->swap();
             break;
-        case MessageType::LAPICTimer:
-            counter_app->increment();
-            window_manager->refresh();
-            framebuffer->swap();
+        case MessageType::Timer:
             break;
         case MessageType::Keyboard: {
             const auto& data = message.data.keyboard;
             printk("%c", data.ascii);
         } break;
+        case MessageType::Mouse: {
+            const auto& data = message.data.mouse;
+            mousecursor->move_position(Point(data.displacement_x, data.displacement_y));
+            if(grubbed_window != nullptr) {
+                grubbed_window->move_position(mousecursor->get_position() - prev_mouse_pos);
+                window_manager->get_layer(application_layer).focus(grubbed_window);
+            }
+
+            const auto left  = data.buttons & 0x01;
+            const auto right = data.buttons & 0x02;
+
+            prev_mouse_pos = mousecursor->get_position();
+            if(!left_pressed & left) {
+                grubbed_window = window_manager->try_grub(mousecursor->get_position());
+            } else if(left_pressed & !left) {
+                grubbed_window = nullptr;
+            }
+            left_pressed  = left;
+            right_pressed = right;
+            refresh();
+        } break;
+        case MessageType::RefreshScreen:
+            window_manager->refresh();
+            framebuffer->swap();
+            break;
         case MessageType::VirtIOGPUControl:
             gpu_device->process_control_queue();
             break;

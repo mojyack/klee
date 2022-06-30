@@ -9,5 +9,7 @@ void     load_idt(uint16_t limit, uint64_t offset);
 void     load_gdt(uint16_t limit, uint64_t offset);
 void     set_csss(uint16_t cs, uint16_t ss);
 void     set_dsall(uint16_t value);
+uint64_t get_cr3();
 void     set_cr3(uint64_t value);
+void     switch_context(void* next, void* current);
 }

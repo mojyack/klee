@@ -3,10 +3,16 @@
 
 enum class MessageType {
     XHCIInterrupt,
-    LAPICTimer,
+    Timer,    // TimerData
     Keyboard, // KeyboardData
+    Mouse,    // MouseData
+    RefreshScreen,
     VirtIOGPUControl,
     VirtIOGPUCursor,
+};
+
+struct TimerData {
+    int value;
 };
 
 struct KeyboardData {
@@ -15,10 +21,18 @@ struct KeyboardData {
     char    ascii;
 };
 
+struct MouseData {
+    uint8_t buttons;
+    int8_t  displacement_x;
+    int8_t  displacement_y;
+};
+
 struct Message {
     MessageType type;
     union {
+        TimerData    timer;
         KeyboardData keyboard;
+        MouseData    mouse;
     } data;
 
     Message() = default;

@@ -62,6 +62,19 @@ class Layer {
         }
         return nullptr;
     }
+
+    auto focus(const Window* window) -> bool {
+        for(auto i = windows.begin(); i < windows.end(); i += 1) {
+            if(i->get() != window) {
+                continue;
+            }
+            auto target = std::move(*i);
+            windows.erase(i);
+            windows.emplace_back(std::move(target));
+            return true;
+        }
+        return false;
+    }
 };
 
 class WindowManager {

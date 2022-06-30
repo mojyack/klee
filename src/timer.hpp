@@ -1,35 +1,77 @@
 #pragma once
-#include <cstdint>
+#include <deque>
 #include <queue>
 
 #include "acpi.hpp"
-#include "interrupt.hpp"
+#include "interrupt-vector.hpp"
+#include "message.hpp"
 
 namespace timer {
-class Timer {
-  private:
-    unsigned int timeout;
-    int          value;
+enum Flags {
+    None     = 0,
+    Periodic = 1 << 0,
+    Task     = 1 << 1,
+};
 
-  public:
-    auto get_timeout() const -> unsigned int {
-        return timeout;
-    }
-
-    auto get_value() const -> int {
-        return value;
-    }
+struct Timer {
+    uint64_t origin;
+    uint64_t timeout;
+    int      value;
+    Flags    flags;
 
     auto operator<(const Timer& o) const -> bool {
         return timeout > o.timeout;
     }
 
-    Timer(const unsigned int timeout, const int value) : timeout(timeout), value(value) {}
+    template <class T, class U>
+    Timer(const T timeout, const int value, const U flags) : Timer(static_cast<uint64_t>(timeout), value, static_cast<Flags>(flags)) {}
+
+    template <>
+    Timer(const uint64_t timeout, const int value, const Flags flags) : timeout(timeout), value(value), flags(flags) {}
 };
 
 class TimerManager {
   private:
+    uint64_t                   tick = 0;
+    std::deque<Message>&       main_queue;
     std::priority_queue<Timer> timers;
+
+  public:
+    auto count_tick() -> bool {
+        tick += 1;
+
+        auto task_switch = false;
+        while(true) {
+            const auto& t = timers.top();
+            if(t.origin + t.timeout > tick) {
+                break;
+            }
+
+            timers.pop();
+            if(t.flags & Flags::Periodic) {
+                add_timer(t);
+            }
+            if(t.flags & Flags::Task) {
+                task_switch = true;
+            } else {
+                auto m             = Message(MessageType::Timer);
+                m.data.timer.value = t.value;
+                main_queue.push_back(m);
+            }
+        }
+        return task_switch;
+    }
+
+    auto get_tick() const -> uint64_t {
+        return tick;
+    }
+
+    auto add_timer(Timer timer) -> void {
+        timer.origin = tick;
+        timers.push(timer);
+    }
+
+    TimerManager(std::deque<Message>& main_queue) : main_queue(main_queue) {}
 };
 
 namespace internal {
