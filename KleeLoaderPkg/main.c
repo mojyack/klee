@@ -11,8 +11,8 @@
 
 #include "elf.h"
 #include "framebuffer.h"
-#include "memory.h"
 #include "memory-map.h"
+#include "memory.h"
 
 EFI_STATUS get_memory_map(struct MemoryMap* const map) {
     if(map->buffer == NULL) {
@@ -210,8 +210,17 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
         halt();
     }
 
+    // find acpi table
+    VOID* acpi_table = NULL;
+    for(UINTN i = 0; i < system_table->NumberOfTableEntries; i += 1) {
+        if(CompareGuid(&gEfiAcpiTableGuid, &system_table->ConfigurationTable[i].VendorGuid)) {
+            acpi_table = system_table->ConfigurationTable[i].VendorTable;
+            break;
+        }
+    }
+
     // load kernel
-    typedef __attribute__((sysv_abi)) void EntryPointType(const struct MemoryMap*, const struct FramebufferConfig*);
+    typedef __attribute__((sysv_abi)) void EntryPointType(const struct MemoryMap*, const struct FramebufferConfig*, const VOID* acpi_table);
 
     EntryPointType* entry;
     assert(load_elf(root_dir, L"\\kernel.elf", (EFI_PHYSICAL_ADDRESS*)&entry), L"failed to load kernel.elf");
@@ -223,7 +232,7 @@ EFI_STATUS EFIAPI uefi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE* system_ta
     }
 
     // call kernel
-    entry(&memmap, &framebuffer_config);
+    entry(&memmap, &framebuffer_config, acpi_table);
 
     Print(L"done");
     while(1) {

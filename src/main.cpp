@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdio>
 
+#include "acpi.hpp"
 #include "apps/counter.hpp"
 #include "asmcode.h"
 #include "console.hpp"
@@ -14,11 +15,11 @@
 #include "print.hpp"
 #include "segment.hpp"
 #include "timer.hpp"
+#include "uefi/gop-framebuffer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
-#include "uefi/gop-framebuffer.hpp"
 
 class Kernel {
   private:
@@ -86,13 +87,13 @@ class Kernel {
         const auto fb = std::unique_ptr<Framebuffer>(new uefi::Framebuffer(framebuffer_config));
         framebuffer   = fb.get();
 
-        const auto wm               = std::unique_ptr<WindowManager>(new WindowManager());
-        window_manager              = wm.get();
-        const auto background_layer = window_manager->create_layer();
+        const auto wm                = std::unique_ptr<WindowManager>(new WindowManager());
+        window_manager               = wm.get();
+        const auto background_layer  = window_manager->create_layer();
         const auto appliction_layer  = window_manager->create_layer();
         const auto mousecursor_layer = window_manager->create_layer();
-        const auto fb_size = framebuffer->get_size();
-        ::console          = window_manager->get_layer(background_layer).open_window<Console>(fb_size[0], fb_size[1]);
+        const auto fb_size           = framebuffer->get_size();
+        ::console                    = window_manager->get_layer(background_layer).open_window<Console>(fb_size[0], fb_size[1]);
 
         // create mouse cursor
         mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
@@ -219,17 +220,19 @@ class Kernel {
         goto loop;
     }
 
-    Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config) : memory_manager(memory_map),
-                                                                                       framebuffer_config(framebuffer_config) {}
+    Kernel(const MemoryMap& memory_map, const FramebufferConfig& framebuffer_config, acpi::RSDP& rsdp) : memory_manager(memory_map),
+                                                                                                         framebuffer_config(framebuffer_config) {
+        acpi::initialize(rsdp);
+    }
 };
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];
 
-auto kernel_instance_buffer = std::array<uint8_t, sizeof(Kernel)>();  // max 4096 * 0x700 (Qemu)
+auto kernel_instance_buffer = std::array<uint8_t, sizeof(Kernel)>(); // max 4096 * 0x700 (Qemu)
 static_assert(sizeof(Kernel) <= 4096 * 0x700, "the kernel size overs buffer size");
 
-extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferConfig& framebuffer_config_ref) {
-    new(kernel_instance_buffer.data()) Kernel(memory_map_ref, framebuffer_config_ref);
+extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferConfig& framebuffer_config_ref, acpi::RSDP& rsdp) {
+    new(kernel_instance_buffer.data()) Kernel(memory_map_ref, framebuffer_config_ref, rsdp);
     reinterpret_cast<Kernel*>(kernel_instance_buffer.data())->run();
     while(1) {
         __asm__("hlt");
