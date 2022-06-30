@@ -96,8 +96,10 @@ class Kernel {
         const auto fb_size           = framebuffer->get_size();
         ::console                    = window_manager->get_layer(background_layer).open_window<Console>(fb_size[0], fb_size[1]);
 
-        // create mouse cursor
-        mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
+        // initialize acpi
+        if(!acpi::initialize(rsdp)) {
+            return;
+        }
 
         // initialize idt
         initialize_interrupt(main_queue);
@@ -179,15 +181,15 @@ class Kernel {
             }
         }
 
+        // create mouse cursor
+        mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
+
         // open counter app
         const auto counter_app = window_manager->get_layer(appliction_layer).open_window<CounterApp>();
 
         // start timre
         timer::initialize_timer();
         printk("klee.\n");
-
-        // initialize acpi
-        acpi::initialize(rsdp);
 
     loop:
         __asm__("cli");
