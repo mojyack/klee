@@ -1,8 +1,10 @@
 #pragma once
 #include <array>
+#include <deque>
 #include <vector>
 
 #include "asmcode.h"
+#include "error.hpp"
 #include "segment.hpp"
 
 namespace task {
@@ -25,6 +27,10 @@ class Task {
   public:
     static constexpr auto default_stack_bytes = size_t(4096);
 
+    auto get_id() const -> uint64_t {
+        return id;
+    }
+
     auto init_context(TaskEntry* func, const int64_t data) -> Task& {
         const auto stack_size = default_stack_bytes / sizeof(stack[0]);
         stack.resize(stack_size);
@@ -46,7 +52,6 @@ class Task {
 
         return *this;
     }
-
     auto get_context() -> TaskContext& {
         return context;
     }
@@ -57,8 +62,8 @@ class Task {
 class TaskManager {
   private:
     std::vector<std::unique_ptr<Task>> tasks;
+    std::deque<Task*>                  running;
     uint64_t                           last_id            = 0;
-    size_t                             current_task_index = 0;
 
   public:
     auto new_task() -> Task& {
@@ -66,18 +71,61 @@ class TaskManager {
         return *tasks.emplace_back(new Task(last_id));
     }
 
-    auto switch_task() -> void {
-        const auto next = (current_task_index + 1) % tasks.size();
+    auto switch_task(const bool sleep_current = false) -> void {
+        const auto current_task = running.front();
+        running.pop_front();
+        if(!sleep_current) {
+            running.push_back(current_task);
+        }
+        const auto next_task = running.front();
 
-        auto& current_task = *tasks[current_task_index];
-        auto& next_task    = *tasks[next];
-        current_task_index = next;
+        switch_context(&next_task->get_context(), &current_task->get_context());
+    }
 
-        switch_context(&next_task.get_context(), &current_task.get_context());
+    auto sleep(Task* const task) -> void {
+        const auto it = std::find(running.begin(), running.end(), task);
+
+        if(it == running.begin()) {
+            switch_task(true);
+            return;
+        }
+
+        if(it == running.end()) {
+            return;
+        }
+
+        running.erase(it);
+    }
+
+    auto sleep(const uint64_t id) -> Error {
+        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->get_id() == id; });
+        if(it == tasks.end()) {
+            return Error::Code::NoSuchTask;
+        }
+
+        sleep(it->get());
+        return Error::Code::Success;
+    }
+
+    auto wakeup(Task* const task) -> void {
+        const auto it = std::find(running.begin(), running.end(), task);
+        if(it == running.end()) {
+            running.push_back(task);
+        }
+    }
+
+    auto wakeup(const uint64_t id) -> Error {
+        const auto it = std::find_if(tasks.begin(), tasks.end(), [id](const auto& t) { return t->get_id() == id; });
+        if(it == tasks.end()) {
+            return Error::Code::NoSuchTask;
+        }
+
+        wakeup(it->get());
+        return Error::Code::Success;
     }
 
     TaskManager() {
-        new_task();
+        running.push_back(&new_task());
     }
 };
 

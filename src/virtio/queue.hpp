@@ -171,7 +171,7 @@ class Queue {
         {
             const auto frames = allocator->allocate(size);
             if(!frames) {
-                logger(LogLevel::Error, "failed to allocate frames for virtio device: ", frames.as_error().to_str());
+                logger(LogLevel::Error, "failed to allocate frames for virtio device: %d\n", frames.as_error());
                 return;
             }
             frame_id = SmartFrameID(frames.as_value(), size);

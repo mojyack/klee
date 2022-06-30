@@ -135,7 +135,7 @@ class Kernel {
                 virtio_gpu = &dev;
             }
         }
-        logger(LogLevel::Debug, "pci bus scan result: %s\n", error.to_str());
+        logger(LogLevel::Debug, "pci bus scan result: %d\n", error);
         const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
         if(xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::InterruptVector::Number::XHCI, 0) &&
            xhc_dev->configure_msix_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::InterruptVector::Number::XHCI, 0)) {
@@ -164,7 +164,7 @@ class Kernel {
         if(xhc_dev->read_vender_id() == 0x8086) {
             switch_ehci_to_xhci(pci, *xhc_dev);
         }
-        logger(LogLevel::Debug, "xhc initialize: %s\n", xhc.initialize().to_str());
+        logger(LogLevel::Debug, "xhc initialize: %d\n", xhc.initialize());
         xhc.run();
 
         // connect usb devices
@@ -175,7 +175,7 @@ class Kernel {
             auto port = xhc.get_port_at(i);
             if(port.is_connected()) {
                 if(const auto error = xhc.configure_port(port)) {
-                    logger(LogLevel::Error, "failed to configure port: %s\n", error.to_str());
+                    logger(LogLevel::Error, "failed to configure port: %d\n", error);
                     continue;
                 }
             }
@@ -186,7 +186,7 @@ class Kernel {
             if(auto result = virtio::gpu::initialize(*virtio_gpu)) {
                 gpu_device.emplace(std::move(result.as_value()));
             } else {
-                logger(LogLevel::Error, "failed to initilize virtio gpu: %s", result.as_error().to_str());
+                logger(LogLevel::Error, "failed to initilize virtio gpu: %d", result.as_error());
             }
         }
 
@@ -200,6 +200,9 @@ class Kernel {
         task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
         task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
         task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
+
+        printk("klee.\n");
+        refresh();
 
     loop:
         __asm__("cli");
@@ -215,7 +218,7 @@ class Kernel {
         case MessageType::XHCIInterrupt:
             while(xhc.has_unprocessed_event()) {
                 if(const auto error = xhc.process_event()) {
-                    logger(LogLevel::Error, "failed to process event: %s\n", error.to_str());
+                    logger(LogLevel::Error, "failed to process event: %d\n", error);
                 }
             }
             break;
@@ -223,6 +226,11 @@ class Kernel {
             break;
         case MessageType::Keyboard: {
             const auto& data = message.data.keyboard;
+            if(data.ascii == 'w') {
+                task::task_manager->wakeup(2);
+            } else if(data.ascii == 's') {
+                task::task_manager->sleep(2);
+            }
             printk("%c", data.ascii);
         } break;
         case MessageType::Mouse: {

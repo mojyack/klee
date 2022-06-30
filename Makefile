@@ -65,7 +65,7 @@ run: run_prep
 	-machine type=q35,accel=kvm \
 	-bios ovmf/OVMF.fd \
 	-cpu host,kvm=off \
-	-display gtk \
+	-display sdl \
 	-enable-kvm \
 	-m 512M \
 	-boot order=c \

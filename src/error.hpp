@@ -26,6 +26,7 @@ class Error {
         UnknownXHCISpeedID,
         NoWaiter,
         NoPCIMSI,
+        NoSuchTask,
         // virtio
         VirtIOLegacyDevice,
         VirtIODeviceNotReady,
@@ -33,40 +34,9 @@ class Error {
     };
 
   private:
-    static constexpr std::array codestr = {
-        "Success",
-        "Full",
-        "Empty",
-        "NoEnoughMemory",
-        "IndexOutOfRange",
-        "HostControllerNotHalted",
-        "InvalidSlotID",
-        "PortNotConnected",
-        "InvalidEndpointNumber",
-        "TransferRingNotSet",
-        "AlreadyAllocated",
-        "NotImplemented",
-        "InvalidDescriptor",
-        "BufferTooSmall",
-        "UnknownDevice",
-        "NoCorrespondingSetupStage",
-        "TransferFailed",
-        "InvalidPhase",
-        "UnknownXHCISpeedID",
-        "NoWaiter",
-        "NoPCIMSI",
-        "VirtIOLegacyDevice",
-        "VirtIODeviceNotReady",
-        "LastOfCode",
-    };
-
     Code code;
 
   public:
-    auto to_str() const -> const char* {
-        return codestr[static_cast<size_t>(code)];
-    }
-
     operator bool() const {
         return code != Code::Success;
     }
