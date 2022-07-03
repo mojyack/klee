@@ -21,6 +21,7 @@ class Framebuffer : public ::Framebuffer {
 
     auto do_swap(const bool flip) -> bool override {
         memcpy(config.frame_buffer, backbuffer.data(), backbuffer.size());
+        notify_refresh_done();
         return true;
     }
 

@@ -2,6 +2,7 @@
 #include <array>
 
 #include "type.hpp"
+#include "task.hpp"
 
 class Framebuffer {
   private:
@@ -10,6 +11,10 @@ class Framebuffer {
   protected:
     virtual auto find_pointer(Point point, bool flip) -> uint8_t* = 0;
     virtual auto do_swap(bool flip) -> bool                       = 0;
+
+    auto notify_refresh_done() -> void {
+        task::kernel_task->send_message(MessageType::RefreshScreenDone);
+    }
 
   public:
     virtual auto get_size() const -> std::array<size_t, 2> = 0;

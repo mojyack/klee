@@ -7,6 +7,8 @@ enum class MessageType {
     Keyboard, // KeyboardData
     Mouse,    // MouseData
     RefreshScreen,
+    RefreshScreenDone,
+    ScreenResized,
     VirtIOGPUControl,
     VirtIOGPUCursor,
 };

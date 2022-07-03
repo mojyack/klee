@@ -7,9 +7,9 @@
 #include "asmcode.h"
 #include "error.hpp"
 #include "message.hpp"
-#include "segment.hpp"
-#include "util.hpp"
 #include "print.hpp"
+#include "segment.hpp"
+#include "util/container-of.hpp"
 
 namespace task {
 struct TaskContext {

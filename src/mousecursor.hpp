@@ -35,7 +35,7 @@ class MouseCursor : public Window {
     };
 
   public:
-    auto refresh_buffer() -> void override {
+    auto refresh_buffer(const bool focused) -> void override {
     }
 
     auto is_grabbable(const Point point) const -> bool override {

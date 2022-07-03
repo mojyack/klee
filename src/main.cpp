@@ -3,8 +3,9 @@
 
 #include "acpi.hpp"
 #include "apps/counter.hpp"
+#include "apps/terminal.hpp"
+#include "apps/wallpaper.hpp"
 #include "asmcode.h"
-#include "console.hpp"
 #include "interrupt.hpp"
 #include "keyboard.hpp"
 #include "log.hpp"
@@ -24,22 +25,6 @@
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
 
-auto refresh() -> void {
-    __asm__("cli");
-    task::kernel_task->send_message(MessageType::RefreshScreen);
-    __asm__("sti");
-}
-
-auto task_b_entry(const uint64_t id, const int64_t data) -> void {
-    auto& layer = *reinterpret_cast<Layer*>(data);
-    auto  app   = layer.open_window<CounterApp>();
-    while(true) {
-        __asm__("hlt");
-        app->increment();
-        refresh();
-    }
-}
-
 class Kernel {
   private:
     BitmapMemoryManager memory_manager;
@@ -47,7 +32,9 @@ class Kernel {
     acpi::RSDP&         rsdp;
     MouseCursor*        mousecursor;
     WindowManager*      window_manager;
-    Window*             grubbed_window = nullptr;
+
+    Window* focused_window         = nullptr;
+    bool    focused_window_grubbed = false;
 
     // mouse click
     Point prev_mouse_pos = {0, 0};
@@ -93,7 +80,7 @@ class Kernel {
         const auto application_layer = window_manager->create_layer();
         const auto mousecursor_layer = window_manager->create_layer();
         const auto fb_size           = framebuffer->get_size();
-        ::console                    = window_manager->get_layer(background_layer).open_window<Console>(fb_size[0], fb_size[1]);
+        const auto background        = window_manager->get_layer(background_layer).open_window<WallpaperApp>(fb_size[0], fb_size[1]);
 
         // initialize acpi
         if(!acpi::initialize(rsdp)) {
@@ -194,12 +181,12 @@ class Kernel {
         timer_manager.add_timer({5, 0, timer::Flags::Periodic | timer::Flags::Task});
 
         task::kernel_task = &task::task_manager->get_current_task();
-        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
-        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer))).wakeup();
-        task::task_manager->new_task().init_context(task_b_entry, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer))).wakeup();
+        task::task_manager->new_task().init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer))).wakeup();
 
         printk("klee.\n");
         refresh();
+
+        auto refresh_screen_done = true;
 
     loop:
         __asm__("cli");
@@ -222,20 +209,15 @@ class Kernel {
         case MessageType::Timer:
             break;
         case MessageType::Keyboard: {
-            const auto& data = message->data.keyboard;
-            if(data.ascii == 'w') {
-                task::task_manager->wakeup(3);
-            } else if(data.ascii == 's') {
-                task::task_manager->sleep(3);
+            if(focused_window != nullptr) {
+                focused_window->get_task().send_message(*message);
             }
-            printk("%c", data.ascii);
         } break;
         case MessageType::Mouse: {
             const auto& data = message->data.mouse;
             mousecursor->move_position(Point(data.displacement_x, data.displacement_y));
-            if(grubbed_window != nullptr) {
-                grubbed_window->move_position(mousecursor->get_position() - prev_mouse_pos);
-                window_manager->get_layer(application_layer).focus(grubbed_window);
+            if(focused_window != nullptr && focused_window_grubbed) {
+                focused_window->move_position(mousecursor->get_position() - prev_mouse_pos);
             }
 
             const auto left  = data.buttons & 0x01;
@@ -243,18 +225,36 @@ class Kernel {
 
             prev_mouse_pos = mousecursor->get_position();
             if(!left_pressed & left) {
-                grubbed_window = window_manager->try_grub(mousecursor->get_position());
+                auto&      a           = window_manager->get_layer(application_layer);
+                const auto f           = a.try_focus(mousecursor->get_position());
+                focused_window         = f != nullptr ? f : focused_window;
+                const auto g           = a.try_grub(mousecursor->get_position());
+                focused_window_grubbed = focused_window == g;
+                if(focused_window != nullptr) {
+                    a.focus(focused_window);
+                }
             } else if(left_pressed & !left) {
-                grubbed_window = nullptr;
+                focused_window_grubbed = false;
             }
             left_pressed  = left;
             right_pressed = right;
             refresh();
         } break;
         case MessageType::RefreshScreen:
-            window_manager->refresh();
+            if(!refresh_screen_done) {
+                break;
+            }
+            refresh_screen_done = false;
+            window_manager->refresh(focused_window);
             framebuffer->swap();
             break;
+        case MessageType::RefreshScreenDone:
+            refresh_screen_done = true;
+            break;
+        case MessageType::ScreenResized: {
+            const auto [w, h] = framebuffer->get_size();
+            background->resize_window(w, h);
+        } break;
         case MessageType::VirtIOGPUControl:
             gpu_device->process_control_queue();
             break;

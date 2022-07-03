@@ -18,10 +18,11 @@ class Layer {
         return w;
     }
 
-    auto refresh() -> void {
+    auto refresh(const Window* const active_window) -> void {
         const auto fb_size = framebuffer->get_size();
         for(const auto& w : windows) {
-            w->refresh_buffer();
+            w->refresh_buffer(w.get() == active_window);
+            const auto  lock        = w->lock_window_resources();
             const auto  pos         = w->get_position();
             const auto  size        = w->get_size();
             const auto  y_begin     = pos.y >= 0 ? pos.y : 0;
@@ -52,6 +53,17 @@ class Layer {
                 }
             }
         }
+    }
+
+    auto try_focus(const Point point) const -> Window* {
+        for(auto& w : windows) {
+            const auto [x, y]   = w->get_position();
+            const auto [wh, hi] = w->get_size();
+            if(x <= point.x && y <= point.y && x + wh > point.x && y + hi > point.y) {
+                return w.get();
+            }
+        }
+        return nullptr;
     }
 
     auto try_grub(const Point point) const -> Window* {
@@ -92,14 +104,10 @@ class WindowManager {
         return layers[id];
     }
 
-    auto refresh() -> void {
+    auto refresh(const Window* const active_window) -> void {
         for(auto& l : layers) {
-            l.refresh();
+            l.refresh(active_window);
         }
-    }
-
-    auto refresh_layer(const size_t id) -> void {
-        layers[id].refresh();
     }
 
     auto try_grub(const Point point) const -> Window* {

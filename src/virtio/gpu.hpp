@@ -1,10 +1,10 @@
 #pragma once
 #include <algorithm>
 
+#include "../framebuffer.hpp"
 #include "../interrupt.hpp"
 #include "../log.hpp"
 #include "../pci.hpp"
-#include "../print.hpp"
 #include "pci.hpp"
 #include "queue.hpp"
 
@@ -308,7 +308,7 @@ class GPUDevice {
                 control_queue.notify_device();
                 break;
             }
-            case internal::Control::ResourceAttachBacking:
+            case internal::Control::ResourceAttachBacking: {
                 if(response->type != internal::Control::OkNodata) {
                     logger(LogLevel::Error, "failed to get attach backing memory %08x\n", response->type);
                     break;
@@ -325,8 +325,12 @@ class GPUDevice {
                     break;
                 }
                 virtio_framebuffer.emplace(std::array{*framebuffer.first[0], *framebuffer.first[1]}, display_size, control_queue, &sync_done);
+                auto [w, h]   = ::framebuffer->get_size();
                 ::framebuffer = &virtio_framebuffer.value();
-                break;
+                if(w != display_size[0] || w != display_size[1]) {
+                    task::kernel_task->send_message(MessageType::ScreenResized);
+                }
+            } break;
             case internal::Control::SetScanout:
             case internal::Control::TransferToHost2D:
             case internal::Control::ResourceFlush:
@@ -341,6 +345,7 @@ class GPUDevice {
             }
             if(response->flags & internal::ControlHeader::flag_fence) {
                 sync_done = 1;
+                task::kernel_task->send_message(MessageType::RefreshScreenDone);
             }
         }
         return Error::Code::Success;
@@ -391,7 +396,7 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
         cap_addr = header.bits.next_ptr;
     }
     if(common_config == nullptr || notify_base == nullptr || device_config == nullptr || isr == nullptr) {
-        printk("the device lacks capability\n");
+        logger(LogLevel::Error, "the device lacks capability\n");
         return Error::Code::VirtIOLegacyDevice;
     }
     const auto device_features   = common_config->read_device_features();
@@ -399,7 +404,7 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
     common_config->device_status = device_status;
     auto driver_features         = Features(0);
     if(!(device_features & features::version1)) {
-        printk("legacy device found\n");
+        logger(LogLevel::Error, "legacy device found\n");
         return Error::Code::VirtIOLegacyDevice;
     } else {
         driver_features |= features::version1;
@@ -408,7 +413,7 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
     device_status |= device_status::features_ok;
     common_config->device_status = device_status;
     if(!(common_config->device_status & device_status::features_ok)) {
-        printk("device not ready\n");
+        logger(LogLevel::Error, "device not ready\n");
         return Error::Code::VirtIODeviceNotReady;
     }
     const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
@@ -435,7 +440,7 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
     device_status |= device_status::driver_ok;
     common_config->device_status = device_status;
     if(!(common_config->device_status & device_status::driver_ok)) {
-        printk("device not ready\n");
+        logger(LogLevel::Error, "device not ready\n");
         return Error::Code::VirtIODeviceNotReady;
     }
 

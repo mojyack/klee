@@ -1,5 +1,5 @@
 #pragma once
-#include "console.hpp"
+#include "print.hpp"
 
 enum class LogLevel {
     Error = 3,
@@ -14,7 +14,7 @@ inline auto operator<=>(const LogLevel lhs, const LogLevel rhs) {
 
 class Logger {
   private:
-    LogLevel log_level = LogLevel::Info;
+    LogLevel log_level = LogLevel::Debug;
 
   public:
     auto set_log_level(const LogLevel level) -> void {
@@ -32,7 +32,7 @@ class Logger {
         va_start(ap, format);
         const auto result = vsnprintf(buffer.data(), buffer.size(), format, ap);
         va_end(ap);
-        console->puts(buffer.data());
+        printk(std::span<char>(buffer.data(), result));
         return result;
     }
 };

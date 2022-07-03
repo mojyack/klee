@@ -7,7 +7,6 @@
 
 namespace keyboard {
 namespace internal {
-
 constexpr auto ascii_table = std::array<char, 256>{
     0, 0, 0, 0, 'a', 'b', 'c', 'd',             // 0
     'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',     // 8

@@ -7,7 +7,14 @@
 #include "error.hpp"
 #include "font.hpp"
 #include "framebuffer.hpp"
+#include "mutex.hpp"
 #include "type.hpp"
+
+inline auto refresh() -> void {
+    __asm__("cli");
+    task::kernel_task->send_message(MessageType::RefreshScreen);
+    __asm__("sti");
+}
 
 class Window {
   protected:
@@ -17,11 +24,14 @@ class Window {
     };
 
   private:
+    Mutex                 mutex;
     std::array<int, 2>    size;
     std::vector<uint32_t> buffer;
     Point                 pos              = {0, 0};
     PositionConstraints   pos_constraint   = PositionConstraints::Free;
     bool                  is_alpha_enabled = false;
+
+    task::Task* task;
 
     auto fix_position() -> void {
         switch(pos_constraint) {
@@ -120,8 +130,12 @@ class Window {
     }
 
   public:
-    virtual auto refresh_buffer() -> void                      = 0;
+    virtual auto refresh_buffer(bool focused) -> void          = 0;
     virtual auto is_grabbable(const Point point) const -> bool = 0;
+
+    auto lock_window_resources() -> SmartMutex {
+        return &mutex;
+    }
 
     auto set_position(const Point new_pos) -> void {
         pos = new_pos;
@@ -141,7 +155,7 @@ class Window {
         return size;
     }
 
-    auto get_buffer() const -> const std::vector<uint32_t> {
+    auto get_buffer() const -> const std::vector<uint32_t>& {
         return buffer;
     }
 
@@ -149,10 +163,16 @@ class Window {
         return is_alpha_enabled;
     }
 
+    auto get_task() -> task::Task& {
+        return *task;
+    }
+
     auto operator=(const Window& o) -> Window& = delete;
     Window(const Window& o)                    = delete;
     Window()                                   = default;
-    Window(const int width, const int height) : size{width, height}, buffer(width * height) {}
+    Window(const int width, const int height) : size{width, height},
+                                                buffer(width * height),
+                                                task(&task::task_manager->get_current_task()) {}
 
     virtual ~Window() = default;
 };
