@@ -1,4 +1,5 @@
 #include "libc-support.hpp"
+//#include "print.hpp"
 
 extern "C" {
 void _exit(void) {
@@ -8,6 +9,10 @@ void _exit(void) {
 }
 
 caddr_t sbrk(const int incr) {
+   // constexpr auto heap_bytes = 64 * 512 * 4096;
+   // 
+   // const auto usage = 100.0 * (program_break_end - program_break - incr) / heap_bytes;
+   // printk("heap %d%%\n", int(usage));
     if(program_break == 0 || program_break + incr >= program_break_end) {
         errno = ENOMEM;
         return (caddr_t)-1;

@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "error.hpp"
+#include "print.hpp"
 #include "libc-support.hpp"
 #include "memory-map.h"
 
@@ -117,6 +118,15 @@ class BitmapMemoryManager {
         return Error::Code::Success;
     }
 
+    auto is_available(const size_t address) -> bool {
+        const auto frame = address / bytes_per_frame;
+        return !get_bit(FrameID(frame));
+    }
+
+    auto is_available(const FrameID frame) -> bool {
+        return !get_bit(frame);
+    }
+
     auto initialize_heap() -> Error {
         constexpr auto heap_frames = 64 * 512;
 
@@ -203,6 +213,7 @@ class SmartFrameID {
     ~SmartFrameID() {
         if(id != nullframe) {
             allocator->deallocate(id, frames);
+            printk("free %lu\n", id);
         }
     }
 };

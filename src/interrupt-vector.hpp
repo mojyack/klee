@@ -5,6 +5,7 @@ class InterruptVector {
     enum Number {
         XHCI = 0x40,
         LAPICTimer,
+        AHCI,
         VirtIOGPUControl,
         VirtIOGPUCursor,
     };

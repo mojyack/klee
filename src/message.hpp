@@ -3,6 +3,7 @@
 
 enum class MessageType {
     XHCIInterrupt,
+    AHCIInterrupt,
     Timer,    // TimerData
     Keyboard, // KeyboardData
     Mouse,    // MouseData

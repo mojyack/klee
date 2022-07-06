@@ -83,6 +83,11 @@ __attribute__((interrupt)) static auto int_handler_lapic_timer(InterruptFrame* c
     }
 }
 
+__attribute__((interrupt)) static auto int_handler_ahci(InterruptFrame* const frame) -> void {
+    task::kernel_task->send_message(MessageType::AHCIInterrupt);
+    notify_end_of_interrupt();
+}
+
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_control(InterruptFrame* const frame) -> void {
     task::kernel_task->send_message(MessageType::VirtIOGPUControl);
     notify_end_of_interrupt();
@@ -99,6 +104,7 @@ inline auto initialize(timer::TimerManager& timer_manager) -> void {
 
     const auto cs = read_cs();
     set_idt_entry(InterruptVector::XHCI, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_xhci), cs);
+    set_idt_entry(InterruptVector::AHCI, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_ahci), cs);
     set_idt_entry(InterruptVector::LAPICTimer, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_lapic_timer), cs);
     set_idt_entry(InterruptVector::VirtIOGPUControl, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_virtio_gpu_control), cs);
     set_idt_entry(InterruptVector::VirtIOGPUCursor, internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(internal::int_handler_virtio_gpu_cursor), cs);

@@ -24,6 +24,7 @@
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
+#include "ahci/ahci.hpp"
 
 class Kernel {
   private:
@@ -98,6 +99,14 @@ class Kernel {
         // initialize idt
         interrupt::initialize(timer_manager);
 
+        // create mouse cursor
+        mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
+
+        // task switching timer
+        timer_manager.add_timer({5, 0, timer::Flags::Periodic | timer::Flags::Task});
+
+        task::kernel_task = &task::task_manager->get_current_task();
+
         // scan pci devices
         auto       pci              = pci::Devices();
         const auto error            = pci.scan_all_bus();
@@ -106,6 +115,7 @@ class Kernel {
         // find devices
         auto xhc_dev    = (const pci::Device*)(nullptr);
         auto virtio_gpu = (const pci::Device*)(nullptr);
+        auto ahci_dev   = (const pci::Device*)(nullptr);
         for(auto i = size_t(0); i < size; i += 1) {
             const auto& dev       = devices[i];
             const auto  vendor_id = dev.read_vender_id();
@@ -117,6 +127,8 @@ class Kernel {
                 }
             } else if(dev.read_vender_id() == 0x1AF4 && pci::read_device_id(dev.bus, dev.device, dev.function) == (0x1040 + 16)) {
                 virtio_gpu = &dev;
+            } else if(dev.class_code.match(0x01, 0x06)) {
+                ahci_dev = &dev;
             }
         }
         logger(LogLevel::Debug, "pci bus scan result: %d\n", error);
@@ -174,13 +186,12 @@ class Kernel {
             }
         }
 
-        // create mouse cursor
-        mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
+        auto sata_controller = std::optional<ahci::Controller>();
+        if(ahci_dev != nullptr) {
+            sata_controller = ahci::initialize(*ahci_dev);
+        }
 
-        // task switching timer
-        timer_manager.add_timer({5, 0, timer::Flags::Periodic | timer::Flags::Task});
-
-        task::kernel_task = &task::task_manager->get_current_task();
+        // open terminal
         task::task_manager->new_task().init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer))).wakeup();
 
         printk("klee.\n");
@@ -205,6 +216,9 @@ class Kernel {
                     logger(LogLevel::Error, "failed to process event: %d\n", error);
                 }
             }
+            break;
+        case MessageType::AHCIInterrupt:
+            sata_controller->on_interrupt();
             break;
         case MessageType::Timer:
             break;
