@@ -207,7 +207,6 @@ struct PRDTEntry {
     uint32_t i : 1;    // Interrupt on completion
 } __attribute__((packed));
 
-template <size_t prdtl>
 struct alignas(0x80) CommandTable {
     // 0x00
     uint8_t cfis[64]; // Command FIS
@@ -219,6 +218,6 @@ struct alignas(0x80) CommandTable {
     uint8_t rsv[48]; // Reserved
 
     // 0x80
-    PRDTEntry prdt_entry[prdtl]; // Physical region descriptor table entries, 0 ~ 65535
+    PRDTEntry prdt_entry[]; // Physical region descriptor table entries, 0 ~ 65535
 } __attribute__((packed));
 } // namespace ahci::internal

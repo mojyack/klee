@@ -2,6 +2,7 @@
 #include <cstdio>
 
 #include "acpi.hpp"
+#include "ahci/ahci.hpp"
 #include "apps/counter.hpp"
 #include "apps/terminal.hpp"
 #include "apps/wallpaper.hpp"
@@ -24,7 +25,6 @@
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
-#include "ahci/ahci.hpp"
 
 class Kernel {
   private:
