@@ -35,14 +35,13 @@ class SATADevice {
     friend auto initialize(const pci::Device& dev) -> std::optional<Controller>;
 
     static constexpr auto prd_per_command_table = 1;
-    static constexpr auto frame_per_prd         = 1;
     static constexpr auto bytes_per_sector      = 512;
 
     using CommandTable = internal::CommandTable<prd_per_command_table>;
 
     struct CommandHeaderResource {
-        std::unique_ptr<CommandTable>                   command_table;
-        std::array<SmartFrameID, prd_per_command_table> prds;
+        std::unique_ptr<CommandTable> command_table;
+        std::unique_ptr<uint8_t>      buffer;
     };
 
     enum class Operation {
@@ -79,14 +78,16 @@ class SATADevice {
                 break;
             case Operation::Identify: {
                 wait_compelete(slot);
-                auto&       identifier = *reinterpret_cast<ata::DeviceIdentifier*>(command_list_resources[slot].prds[0]->get_frame());
-                lba_size               = *reinterpret_cast<uint64_t*>(identifier.available_48bit_lba);
+                auto& resource = command_list_resources[slot];
+                auto& identifier = *reinterpret_cast<ata::DeviceIdentifier*>(resource.buffer.get());
+                lba_size         = *reinterpret_cast<uint64_t*>(identifier.available_48bit_lba);
                 for(auto i = 0; i < 10; i += 1) {
                     const auto w          = identifier.model_name[i];
                     model_name[i * 2]     = (w & 0xFF00) >> 8;
                     model_name[i * 2 + 1] = w & 0xFF;
                 }
                 printk("[ahci] disk identified: \"%.20s\" %luMiB\n", model_name.data(), lba_size * bytes_per_sector / 1024 / 1024);
+                resource.buffer.reset();
                 running_operations[slot] = Operation::None;
             } break;
             }
@@ -105,8 +106,16 @@ class SATADevice {
         auto& command_header = command_list.get()[slot];
         command_header.cfl   = sizeof(RegH2DFIS) / sizeof(uint32_t);
         command_header.w     = 0;
+        command_header.prdtl = 1;
 
-        auto& command_table = *command_list_resources[slot].command_table;
+        auto& resource = command_list_resources[slot];
+        auto& prd      = resource.command_table->prdt_entry[0];
+        resource.buffer.reset(new uint8_t[512]);
+        set_dwords(prd.dba, prd.dbau, resource.buffer.get());
+        prd.dbc = 512 - 1;
+        prd.i   = 0;
+
+        auto& command_table = *resource.command_table;
         auto& cfis          = *reinterpret_cast<RegH2DFIS*>(command_table.cfis);
         memset(&cfis, 0, sizeof(RegH2DFIS));
         cfis.fis_type = FISType::RegH2D;
@@ -129,24 +138,9 @@ class SATADevice {
         running_operations[slot] = Operation::Identify;
         port->ci                 = 1 << slot;
         return;
+    }
 
-        while(true) {
-            if((port->ci & (1 << slot)) == 0) {
-                break;
-            }
-            if(port->is.bits.tfes) {
-                logger(LogLevel::Error, "[ahci] task file error\n");
-                return;
-            }
-        }
-
-        const auto data = reinterpret_cast<uint8_t*>(command_list_resources[slot].prds[0]->get_frame());
-        for(auto i = 0; i < 512; i += 1) {
-            printk("%02X ", data[i]);
-            if((i % 32) == 0) {
-                printk("\n");
-            }
-        }
+    auto read(const uint64_t sector, const uint32_t count, void* const buffer) {
     }
 };
 
@@ -270,31 +264,16 @@ inline auto initialize(const pci::Device& dev) -> std::optional<Controller> {
         device.command_list_resources.resize(device.num_command_slots);
         for(auto i = 0; i < device.num_command_slots; i += 1) {
             auto& command_header = device.command_list.get()[i];
-            command_header.prdtl = SATADevice::prd_per_command_table;
 
             auto resource = SATADevice::CommandHeaderResource();
             resource.command_table.reset(new SATADevice::CommandTable);
             set_dwords(command_header.ctba, command_header.ctbau, resource.command_table.get());
-            for(auto p = 0; p < SATADevice::prd_per_command_table; p += 1) {
-                const auto frame = allocator->allocate(SATADevice::frame_per_prd);
-                if(!frame) {
-                    logger(LogLevel::Error, "[ahci] failed to allocate frames\n");
-                    goto next_port;
-                }
-                resource.prds[p]         = SmartFrameID(frame.as_value(), SATADevice::frame_per_prd);
-                const auto database_addr = reinterpret_cast<uintptr_t>(resource.prds[p]->get_frame());
-                auto&      entry         = (*resource.command_table).prdt_entry[p];
-                set_dwords(entry.dba, entry.dbau, database_addr);
-                entry.dbc = bytes_per_frame * SATADevice::frame_per_prd - 1;
-            }
             device.command_list_resources[i] = std::move(resource);
         }
         set_dwords(port.clb, port.clbu, reinterpret_cast<uintptr_t>(device.command_list.get()));
         set_dwords(port.fb, port.fbu, reinterpret_cast<uintptr_t>(device.received_fis.get()));
         devices.emplace_back(std::move(device));
         port.start();
-    next_port:
-        continue;
     }
 
     const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
