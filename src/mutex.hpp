@@ -7,7 +7,7 @@ class Mutex {
 
   public:
     auto aquire() -> void {
-        if(flag.test_and_set()) {
+        while(flag.test_and_set()) {
             task::task_manager->get_current_task().sleep();
         }
     }
