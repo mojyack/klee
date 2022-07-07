@@ -132,15 +132,15 @@ class SATADevice {
     }
 
     auto set_cfis_lba(internal::RegH2DFIS& cfis, const uint64_t sector, const uint32_t count) -> void {
-        cfis.lba0     = sector;
-        cfis.lba1     = sector >> 8;
-        cfis.lba2     = sector >> 16;
-        cfis.lba3     = sector >> 24;
-        cfis.lba4     = sector >> 32;
-        cfis.lba5     = sector >> 40;
-        cfis.device   = 1 << 6; // LBA
-        cfis.countl   = count;
-        cfis.counth   = count >> 8;
+        cfis.lba0   = sector;
+        cfis.lba1   = sector >> 8;
+        cfis.lba2   = sector >> 16;
+        cfis.lba3   = sector >> 24;
+        cfis.lba4   = sector >> 32;
+        cfis.lba5   = sector >> 40;
+        cfis.device = 1 << 6; // LBA
+        cfis.countl = count;
+        cfis.counth = count >> 8;
     }
 
   public:
@@ -158,18 +158,16 @@ class SATADevice {
                     model_name[i * 2]     = (w & 0xFF00) >> 8;
                     model_name[i * 2 + 1] = w & 0xFF;
                 }
-                printk("[ahci] disk identified: \"%.20s\" %luMiB\n", model_name.data(), lba_size * bytes_per_sector / 1024 / 1024);
+                logger(LogLevel::Debug, "[ahci] disk identified: \"%.20s\" %luMiB\n", model_name.data(), lba_size * bytes_per_sector / 1024 / 1024);
                 identify_buffer.reset();
                 running_operations[slot] = Operation::None;
             } break;
             case Operation::Read:
                 wait_compelete(slot);
-                printk("read done\n");
                 running_operations[slot] = Operation::None;
                 break;
             case Operation::Write:
                 wait_compelete(slot);
-                printk("read done\n");
                 running_operations[slot] = Operation::None;
                 break;
             }
@@ -264,7 +262,7 @@ class Controller {
 inline auto initialize(const pci::Device& dev) -> std::optional<Controller> {
     using namespace internal;
 
-    printk("[ahci] controller found at %d.%d.%d\n", dev.bus, dev.device, dev.function);
+    logger(LogLevel::Debug, "[ahci] controller found at %d.%d.%d\n", dev.bus, dev.device, dev.function);
     const auto abar = dev.read_bar(5);
     if(!abar) {
         logger(LogLevel::Error, "[ahci] failed to read bar\n");
@@ -305,23 +303,23 @@ inline auto initialize(const pci::Device& dev) -> std::optional<Controller> {
             continue;
         }
 
-        printk("[ahci] port %d = ", i);
+        logger(LogLevel::Debug, "[ahci] port %d = ", i);
 
         switch(port.sig) {
         case HBAPort::Signature::ATA:
-            printk("ATA\n");
+            logger(LogLevel::Debug, "ATA\n");
             break;
         case HBAPort::Signature::ATAPI:
-            printk("ATAPI\n");
+            logger(LogLevel::Debug, "ATAPI\n");
             break;
         case HBAPort::Signature::ATASEMB:
-            printk("ATASEMB\n");
+            logger(LogLevel::Debug, "ATASEMB\n");
             break;
         case HBAPort::Signature::PM:
-            printk("PM\n");
+            logger(LogLevel::Debug, "PM\n");
             break;
         default:
-            printk("unknown(%08lx)\n", port.sig);
+            logger(LogLevel::Debug, "unknown(%08lx)\n", port.sig);
             break;
         }
 
