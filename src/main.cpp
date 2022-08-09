@@ -83,7 +83,6 @@ class Kernel {
         const auto application_layer = window_manager->create_layer();
         const auto mousecursor_layer = window_manager->create_layer();
         const auto fb_size           = framebuffer->get_size();
-        const auto background        = window_manager->get_layer(background_layer).open_window<WallpaperApp>(fb_size[0], fb_size[1]);
 
         // initialize acpi
         if(!acpi::initialize(rsdp)) {
@@ -100,6 +99,9 @@ class Kernel {
 
         // initialize idt
         interrupt::initialize(timer_manager);
+
+        // create background
+        const auto background = window_manager->get_layer(background_layer).open_window<WallpaperApp>(fb_size[0], fb_size[1]);
 
         // create mouse cursor
         mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
