@@ -23,9 +23,9 @@ class PartitionBlockDevice : public BlockDevice {
         return parent->write_sector(sector + first_sector, count, buffer);
     }
 
-    PartitionBlockDevice(BlockDevice* const parent, const size_t first_sector, const size_t total_sectors) : parent(parent),
-                                                                                                             first_sector(first_sector),
-                                                                                                             sector_size(parent->get_info().bytes_per_sector),
-                                                                                                             total_sectors(total_sectors) {}
+    PartitionBlockDevice(BlockDevice& parent, const size_t first_sector, const size_t total_sectors) : parent(&parent),
+                                                                                                       first_sector(first_sector),
+                                                                                                       sector_size(parent.get_info().bytes_per_sector),
+                                                                                                       total_sectors(total_sectors) {}
 };
 } // namespace block::partition

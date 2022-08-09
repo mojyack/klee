@@ -85,7 +85,7 @@ class Task {
 
 class TaskManager {
   private:
-    constexpr static auto max_nice = 3;
+    constexpr static auto max_nice = 4;
 
     struct ManagedTask {
         Task     task;

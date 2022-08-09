@@ -89,11 +89,11 @@ struct Partition {
     std::unique_ptr<BlockDevice> device;
 };
 
-inline auto find_partitions(BlockDevice* const device) -> Result<std::vector<Partition>> {
-    auto info   = device->get_info();
+inline auto find_partitions(BlockDevice& device) -> Result<std::vector<Partition>> {
+    auto info   = device.get_info();
     auto buffer = std::vector<uint8_t>(info.bytes_per_sector);
 
-    device->read_sector(0, 1, buffer.data());
+    device.read_sector(0, 1, buffer.data());
     const auto& mbr = *reinterpret_cast<MBR*>(buffer.data());
     if(mbr.signature[0] != 0x55 || mbr.signature[1] != 0xAA) {
         return Error::Code::NotMBR;
@@ -103,7 +103,7 @@ inline auto find_partitions(BlockDevice* const device) -> Result<std::vector<Par
         return Error::Code::NotGPT;
     }
 
-    device->read_sector(1, 1, buffer.data());
+    device.read_sector(1, 1, buffer.data());
     const auto header = *reinterpret_cast<PartitionTableHeader*>(buffer.data());
     if(std::string_view(header.signature, 8) != "EFI PART") {
         return Error::Code::NotGPT;
@@ -117,7 +117,7 @@ inline auto find_partitions(BlockDevice* const device) -> Result<std::vector<Par
         const auto lba = header.entry_array_lba + sizeof(PartitionEntry) * i / info.bytes_per_sector;
         if(buffer_lba != lba) {
             buffer_lba = lba;
-            device->read_sector(lba, 1, buffer.data());
+            device.read_sector(lba, 1, buffer.data());
         }
         const auto& entry = *reinterpret_cast<PartitionEntry*>(buffer.data() + sizeof(PartitionEntry) * i % info.bytes_per_sector);
         if(entry.type == GUID{0, 0}) {

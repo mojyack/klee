@@ -7,7 +7,9 @@
 #include "apps/terminal.hpp"
 #include "apps/wallpaper.hpp"
 #include "asmcode.h"
+#include "fs/main.hpp"
 #include "interrupt.hpp"
+#include "kernel-commands.hpp"
 #include "keyboard.hpp"
 #include "log.hpp"
 #include "memory-manager.hpp"
@@ -25,27 +27,6 @@
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
-
-auto fs_main(const uint64_t id, const int64_t data) -> void {
-    auto& controller = *reinterpret_cast<ahci::Controller*>(data);
-    auto& this_task = task::task_manager->get_current_task();
-    auto event = Event();
-    auto mbr = std::array<uint8_t, 512>();
-    controller.get_devices()[0].read(0, 1, mbr.data(), 512, event);
-    event.wait();
-    printk("[fs] done\n");
-    while(true) {
-        const auto message = this_task.receive_message();
-        if(!message) {
-            this_task.sleep();
-            continue;
-        }
-        switch(message->type) {
-        default:
-            break;
-        }
-    }
-}
 
 class Kernel {
   private:
@@ -215,7 +196,7 @@ class Kernel {
         // open filesystem manager
         {
             auto& fs = task::task_manager->new_task();
-            fs.init_context(fs_main, reinterpret_cast<int64_t>(&sata_controller.value()));
+            fs.init_context(fs::main, reinterpret_cast<int64_t>(&sata_controller.value()));
             fs.wakeup(1);
         }
 

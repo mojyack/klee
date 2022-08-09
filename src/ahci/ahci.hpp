@@ -31,11 +31,16 @@ inline auto set_dwords(volatile uint32_t& base, volatile uint32_t& upper, const 
 
 class Controller;
 
+struct DeviceInfo {
+    size_t bytes_per_sector;
+    size_t total_sectors;
+};
+
 class SATADevice {
   private:
     friend auto initialize(const pci::Device& dev) -> std::optional<Controller>;
 
-    static constexpr auto bytes_per_sector = 512;
+    static constexpr auto bytes_per_sector = size_t(512);
 
     struct CommandHeaderResource {
         std::unique_ptr<uint8_t> command_table;
@@ -186,12 +191,12 @@ class SATADevice {
         cfis.featurel = 1;
         cfis.command  = ata::Commands::IdentifyDevice;
 
-        identify_buffer.reset(new uint8_t[512]);
+        identify_buffer.reset(new uint8_t[bytes_per_sector]);
 
-        return emit_h2d_command(identify_buffer.get(), 512, 512, cfis, Operation::Identify, nullptr);
+        return emit_h2d_command(identify_buffer.get(), bytes_per_sector, bytes_per_sector, cfis, Operation::Identify, nullptr);
     }
 
-    auto read(const uint64_t sector, const uint32_t count, uint8_t* buffer, size_t buffer_size, Event& on_complete) -> bool {
+    auto read(const uint64_t sector, const uint32_t count, uint8_t* buffer, const size_t buffer_size, Event& on_complete) -> bool {
         using namespace internal;
 
         auto cfis = RegH2DFIS();
@@ -206,7 +211,7 @@ class SATADevice {
         return emit_h2d_command(buffer, buffer_size, count * bytes_per_sector, cfis, Operation::Read, &on_complete);
     }
 
-    auto write(const uint64_t sector, const uint32_t count, uint8_t* buffer, size_t buffer_size, Event& on_complete) -> bool {
+    auto write(const uint64_t sector, const uint32_t count, const uint8_t* buffer, const size_t buffer_size, Event& on_complete) -> bool {
         using namespace internal;
 
         auto cfis = RegH2DFIS();
@@ -218,7 +223,11 @@ class SATADevice {
         cfis.command  = ata::Commands::WriteDMAExt;
         set_cfis_lba(cfis, sector, count);
 
-        return emit_h2d_command(buffer, buffer_size, count * bytes_per_sector, cfis, Operation::Write, &on_complete);
+        return emit_h2d_command(const_cast<uint8_t*>(buffer), buffer_size, count * bytes_per_sector, cfis, Operation::Write, &on_complete);
+    }
+
+    auto get_info() const -> DeviceInfo {
+        return {bytes_per_sector, lba_size};
     }
 };
 

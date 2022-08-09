@@ -1,4 +1,5 @@
 #pragma once
+#include "../kernel-commands.hpp"
 #include "../mutex.hpp"
 #include "../util/variant.hpp"
 #include "../window-manager.hpp"
@@ -57,6 +58,11 @@ class Shell {
         } else if(argv[0] == "dmesg") {
             for(auto i = 0; i < printk_buffer.len; i += 1) {
                 putc(printk_buffer.buffer[(i + printk_buffer.head) % printk_buffer.buffer.size()]);
+            }
+        } else if(argv[0] == "lsblk") {
+            const auto disks = commands::list_blocks();
+            for(const auto& d : disks) {
+                puts(d.data());
             }
         } else {
             puts("unknown command");
@@ -259,9 +265,9 @@ class Terminal : public StandardWindow {
     }
 
     static auto main(const uint64_t id, const int64_t data) -> void {
-        auto  app        = reinterpret_cast<Layer*>(data)->open_window<Terminal>(800, 600);
-        auto& this_task  = task::task_manager->get_current_task();
-        auto  shell      = terminal::Shell([app](char c) { app->putc(c); }, [app](std::string_view s) { app->puts(s); });
+        auto  app       = reinterpret_cast<Layer*>(data)->open_window<Terminal>(800, 600);
+        auto& this_task = task::task_manager->get_current_task();
+        auto  shell     = terminal::Shell([app](char c) { app->putc(c); }, [app](std::string_view s) { app->puts(s); });
         while(true) {
             const auto message = this_task.receive_message();
             if(!message) {

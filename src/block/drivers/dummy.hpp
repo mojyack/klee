@@ -4,6 +4,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "../../macro.hpp"
 #include "../block.hpp"
 
 namespace block::dummy {
@@ -36,16 +37,19 @@ class DummyBlockDevice : public BlockDevice {
         return Error();
     }
 
-    auto get_cache(const size_t sector) -> Result<SectorCache*> {
-        if(auto p = cache.find(sector); p != cache.end()) {
-            return &p->second;
+    auto write_file(const size_t sector, const uint8_t* const buffer) -> Error {
+        if(sector >= total_sectors) {
+            return Error::Code::InvalidSector;
         }
 
-        auto new_cache = SectorCache();
-        if(const auto e = read_file(sector, new_cache.data.get())) {
-            return e;
+        file.seekp(sector * sector_size);
+        file.write(reinterpret_cast<const char*>(buffer), sector_size);
+
+        if(file.fail()) {
+            return Error::Code::IOError;
         }
-        return &cache.emplace(sector, std::move(new_cache)).first->second;
+
+        return Error();
     }
 
   public:
@@ -55,14 +59,8 @@ class DummyBlockDevice : public BlockDevice {
 
     auto read_sector(const size_t sector, const size_t count, void* const buffer) -> Error override {
         for(auto i = 0; i < count; i += 1) {
-            const auto s      = sector + i;
-            auto       result = get_cache(s);
-            if(!result) {
-                return result.as_error();
-            }
-
-            auto& cache = *result.as_value();
-            std::memcpy(static_cast<uint8_t*>(buffer) + sector_size * i, cache.data.get(), sector_size);
+            const auto s = sector + i;
+            error_or(read_file(s, static_cast<uint8_t*>(buffer) + sector_size * i));
         }
 
         return Error();
@@ -70,16 +68,8 @@ class DummyBlockDevice : public BlockDevice {
 
     auto write_sector(size_t sector, size_t count, const void* buffer) -> Error override {
         for(auto i = 0; i < count; i += 1) {
-            const auto s      = sector + i;
-            auto       result = get_cache(s);
-            if(!result) {
-                return result.as_error();
-            }
-
-            auto& cache = *result.as_value();
-
-            cache.dirty = true;
-            std::memcpy(cache.data.get(), static_cast<const uint8_t*>(buffer) + sector_size * i, sector_size);
+            const auto s = sector + i;
+            error_or(write_file(s, static_cast<const uint8_t*>(buffer) + sector_size * i));
         }
 
         return Error();
