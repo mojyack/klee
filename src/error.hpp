@@ -70,6 +70,7 @@ class Error {
         return static_cast<unsigned int>(code);
     }
 
+    Error() : code(Code::Success) {}
     Error(const Code code) : code(code) {}
 };
 
