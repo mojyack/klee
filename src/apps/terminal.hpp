@@ -119,7 +119,7 @@ class Shell {
                 if(!r) {
                     const auto e = r.as_error();
                     if(e != Error::Code::EndOfFile) {
-                        print("readdir error: ", e.as_int());
+                        print("readdir error: %d", e.as_int());
                     }
                     break;
                 }
