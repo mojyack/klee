@@ -36,7 +36,7 @@ class OpenInfo {
     uint32_t    write_count = 0;
     uint32_t    child_count = 0;
     FileType    type;
-    size_t      size;
+    size_t      filesize;
     OpenInfo*   parent = nullptr;
     OpenInfo*   mount  = nullptr;
 
@@ -57,12 +57,16 @@ class OpenInfo {
         return volume_root;
     }
 
-    OpenInfo(const std::string_view name, Driver& driver, const auto driver_data, const FileType type, const size_t size, const bool volume_root = false) : driver(&driver),
+    auto read_driver() const -> const Driver* {
+        return driver;
+    }
+
+    OpenInfo(const std::string_view name, Driver& driver, const auto driver_data, const FileType type, const size_t filesize, const bool volume_root = false) : driver(&driver),
                                                                                                                                                             driver_data((uintptr_t)driver_data),
                                                                                                                                                             volume_root(volume_root),
                                                                                                                                                             name(name),
                                                                                                                                                             type(type),
-                                                                                                                                                            size(size) {}
+                                                                                                                                                            filesize(filesize) {}
 
     // test stuff
     struct Testdata {
@@ -135,14 +139,14 @@ inline auto OpenInfo::read(const size_t offset, const size_t size, void* const b
     if(!check_opened(false)) {
         return Error::Code::FileNotOpened;
     }
-    return driver->read({type, size, driver_data}, offset, size, buffer);
+    return driver->read({type, filesize, driver_data}, offset, size, buffer);
 }
 
 inline auto OpenInfo::write(const size_t offset, const size_t size, const void* const buffer) -> Error {
     if(!check_opened(true)) {
         return Error::Code::FileNotOpened;
     }
-    return driver->write({type, size, driver_data}, offset, size, buffer);
+    return driver->write({type, filesize, driver_data}, offset, size, buffer);
 }
 
 inline auto OpenInfo::find(const std::string_view name) -> Result<OpenInfo> {
@@ -150,7 +154,7 @@ inline auto OpenInfo::find(const std::string_view name) -> Result<OpenInfo> {
         return Error::Code::FileNotOpened;
     }
 
-    auto r = driver->find({type, size, driver_data}, name);
+    auto r = driver->find({type, filesize, driver_data}, name);
     if(r) {
         r.as_value().parent = this;
     }
@@ -161,7 +165,7 @@ inline auto OpenInfo::create(const std::string_view name, const FileType type) -
     if(!check_opened(true)) {
         return Error::Code::FileNotOpened;
     }
-    return driver->create({type, size, driver_data}, name, type);
+    return driver->create({type, filesize, driver_data}, name, type);
 }
 
 inline auto OpenInfo::readdir(const size_t index) -> Result<OpenInfo> {
@@ -169,7 +173,7 @@ inline auto OpenInfo::readdir(const size_t index) -> Result<OpenInfo> {
         return Error::Code::FileNotOpened;
     }
 
-    auto r = driver->readdir({type, size, driver_data}, index);
+    auto r = driver->readdir({type, filesize, driver_data}, index);
     if(r) {
         r.as_value().parent = this;
     }
@@ -183,6 +187,6 @@ inline auto OpenInfo::remove(const std::string_view name) -> Error {
     if(children.find(std::string(name)) != children.end()) {
         return Error::Code::FileOpened;
     }
-    return driver->remove({type, size, driver_data}, name);
+    return driver->remove({type, filesize, driver_data}, name);
 }
 } // namespace fs

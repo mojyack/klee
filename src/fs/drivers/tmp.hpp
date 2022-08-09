@@ -232,8 +232,4 @@ class Driver : public fs::Driver {
     Driver() : data(Directory("/")),
                root("/", *this, &data, FileType::Directory, 0, true) {}
 };
-
-inline auto new_driver() -> Driver {
-    return Driver();
-}
 } // namespace fs::tmp

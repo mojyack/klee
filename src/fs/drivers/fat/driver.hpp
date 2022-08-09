@@ -210,6 +210,7 @@ class Driver : public fs::Driver {
         auto buffer = std::vector<uint8_t>(block->get_info().bytes_per_sector);
         error_or(block->read_sector(0, 1, buffer.data()));
         const auto& bpb = *reinterpret_cast<BPB*>(buffer.data());
+
         assert(bpb.signature[0] == 0x55 && bpb.signature[1] == 0xAA, Error::Code::NotFAT);
         assert(bpb.bytes_per_sector == block->get_info().bytes_per_sector, Error::Code::NotImplemented);
 
@@ -330,6 +331,5 @@ inline auto new_driver(block::BlockDevice& block) -> Result<std::unique_ptr<Driv
     return driver;
 }
 
-#undef error_or
 #undef assert
 } // namespace fs::fat

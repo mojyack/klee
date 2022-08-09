@@ -46,6 +46,17 @@ class Shell {
 
     std::string line_buffer;
 
+    auto print(const char* const format, ...) -> int {
+        static auto buffer = std::array<char, 1024>();
+
+        va_list ap;
+        va_start(ap, format);
+        const auto result = vsnprintf(buffer.data(), buffer.size(), format, ap);
+        va_end(ap);
+        puts(std::string_view(buffer.data(), result));
+        return result;
+    }
+
     auto interpret(const std::string_view arg) -> void {
         const auto argv = split(arg);
         if(argv.size() == 0) {
@@ -63,6 +74,99 @@ class Shell {
             const auto disks = commands::list_blocks();
             for(const auto& d : disks) {
                 puts(d.data());
+            }
+        } else if(argv[0] == "mount") {
+            if(argv.size() == 1) {
+                const auto mounts = commands::get_mounts();
+                if(mounts.empty()) {
+                    puts("(no mounts)");
+                    return;
+                }
+                for(const auto& m : mounts) {
+                    print("%s on \"%s\"\n", m.device.data(), m.path.data());
+                }
+            } else if(argv.size() == 3) {
+                const auto e = commands::mount(argv[1], argv[2]);
+                if(e) {
+                    print("mount error: %d\n", e.as_int());
+                }
+            } else {
+                puts("usage: mount\n");
+                puts("       mount DEVICE MOUNTPOINT\n");
+            }
+        } else if(argv[0] == "umount") {
+            if(argv.size() != 2) {
+                puts("usage: umount MOUNTPOINT");
+                return;
+            }
+            const auto e = commands::unmount(argv[1]);
+            if(e) {
+                print("unmount error: %d\n", e.as_int());
+            }
+        } else if(argv[0] == "ls") {
+            auto path = std::string_view("/");
+            if(argv.size() == 2) {
+                path = argv[1];
+            }
+            auto& root          = commands::get_filesystem_root();
+            auto  handle_result = root.open(path, fs::OpenMode::Read);
+            if(!handle_result) {
+                print("open error: %d\n", handle_result.as_error().as_int());
+            }
+            auto& handle = handle_result.as_value();
+            for(auto i = 0;; i += 1) {
+                const auto r = handle.readdir(i);
+                if(!r) {
+                    const auto e = r.as_error();
+                    if(e != Error::Code::EndOfFile) {
+                        print("readdir error: ", e.as_int());
+                    }
+                    break;
+                }
+                auto& o = r.as_value();
+                puts(o.name);
+                putc('\n');
+            }
+            root.close(handle);
+        } else if(argv[0] == "cat") {
+            if(argv.size() != 2) {
+                puts("usage: cat FILE");
+                return;
+            }
+            auto& root          = commands::get_filesystem_root();
+            auto  handle_result = root.open(argv[1], fs::OpenMode::Read);
+            if(!handle_result) {
+                print("open error: %d", handle_result.as_error().as_int());
+                return;
+            }
+            auto& handle = handle_result.as_value();
+            if(handle.get_filesize() == 0) {
+                puts("(empty file)\n");
+                return;
+            }
+            print("size %lu\n", handle.get_filesize());
+            for(auto i = size_t(0); i < handle.get_filesize(); i += 1) {
+                auto c = char();
+                if(const auto e = handle.read(i, 1, &c)) {
+                    print("read error: %d\n", e.as_int());
+                    return;
+                }
+                if(c >= 0x20) {
+                    putc(c);
+                    continue;
+                }
+                if(c <= 0) {
+                    putc(' ');
+                    continue;
+                }
+                switch(c) {
+                case 0x09:
+                    putc(' ');
+                    break;
+                case 0x0A:
+                    putc('\n');
+                    break;
+                }
             }
         } else {
             puts("unknown command");

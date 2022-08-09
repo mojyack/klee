@@ -1,5 +1,4 @@
 #pragma once
-#include "../path.hpp"
 #include "drivers/basic.hpp"
 #include "drivers/tmp.hpp"
 
@@ -87,7 +86,7 @@ class Handle {
 
         if(created_info) {
             auto& v = created_info.value();
-            result = &children.emplace(v.name, v).first->second;
+            result  = &children.emplace(v.name, v).first->second;
         }
 
         auto node = result->parent;
@@ -119,8 +118,8 @@ class Handle {
         return data->remove(name);
     }
 
-    auto get_size() const -> size_t {
-        return data->size;
+    auto get_filesize() const -> size_t {
+        return data->filesize;
     }
 
     Handle(OpenInfo* const data, const OpenMode mode) : data(data), mode(mode) {}
@@ -145,9 +144,21 @@ class Controller {
         return Handle(info, mode);
     }
 
+    static auto split_path(const std::string_view path) -> std::vector<std::string_view> {
+        auto r = std::vector<std::string_view>();
+
+        auto end   = size_t(0);
+        auto start = size_t();
+        while((start = path.find_first_not_of('/', end)) != std::string_view::npos) {
+            end = path.find('/', start);
+            r.emplace_back(path.substr(start, end - start));
+        }
+        return r;
+    }
+
   public:
     auto open(const std::string_view path, const OpenMode mode) -> Result<Handle> {
-        auto elms     = split_path(path);
+        auto elms = split_path(path);
         if(elms.empty()) {
             return open_root(mode);
         }
@@ -214,7 +225,7 @@ class Controller {
         return Error();
     }
 
-    auto unmount(const std::string_view path) -> Error {
+    auto unmount(const std::string_view path) -> Result<const Driver*> {
         for(auto i = mount_list.rbegin(); i != mount_list.rend(); i += 1) {
             if(i->path != path) {
                 continue;
@@ -227,9 +238,9 @@ class Controller {
             mount_point->mount  = nullptr;
             volume_root->parent = nullptr;
 
-            auto e = Error();
+            auto e = Result<const Driver*>(volume_root->read_driver());
             if(e = close(i->handle); e) {
-                logger(LogLevel::Error, "failed to close mountpoint, this is kernel bug: %d\n", e.as_int());
+                logger(LogLevel::Error, "failed to close mountpoint, this is kernel bug: %d\n", e.as_error().as_int());
             }
             mount_list.erase(std::next(i).base());
             return e;
