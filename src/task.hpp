@@ -2,6 +2,7 @@
 #include <array>
 #include <deque>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include "asmcode.h"
@@ -79,8 +80,25 @@ class Task {
 
     auto sleep() -> Task&;
     auto wakeup(int nice = -1) -> Task&;
+    auto wait_address(const void* const address) -> void;
 
     Task(const uint64_t id) : id(id) {}
+};
+
+class SpinLock {
+  private:
+    std::atomic_flag flag;
+
+  public:
+    auto aquire() -> void {
+        //while(flag.test_and_set()) {
+        //    //
+        //}
+    }
+
+    auto release() -> void {
+        flag.clear();
+    }
 };
 
 class TaskManager {
@@ -100,6 +118,9 @@ class TaskManager {
     uint64_t                                           last_id      = 0;
     int                                                current_nice = 0;
     bool                                               nice_changed = false;
+
+    SpinLock                                                 wait_address_tasks_lock;
+    std::unordered_map<uintptr_t, std::vector<ManagedTask*>> wait_address_tasks;
 
     template <class T, class U>
     void erase(T& c, const U& value) {
@@ -172,6 +193,22 @@ class TaskManager {
         if(nice < current_nice) {
             nice_changed = true;
         }
+    }
+
+    auto wait_address(const void* const address, ManagedTask* const task) -> void {
+        const auto key = reinterpret_cast<uintptr_t>(address);
+
+        wait_address_tasks_lock.aquire();
+        const auto p = wait_address_tasks.find(key);
+        if(p == wait_address_tasks.end()) {
+            // bug
+            wait_address_tasks_lock.release();
+            return;
+        }
+        p->second.emplace_back(task);
+        wait_address_tasks_lock.release();
+
+        sleep(task);
     }
 
   public:
@@ -249,6 +286,57 @@ class TaskManager {
         return running[current_nice].front()->task;
     }
 
+    auto add_wait_address(const void* const address) -> void {
+        const auto key = reinterpret_cast<uintptr_t>(address);
+
+        wait_address_tasks_lock.aquire();
+        if(wait_address_tasks.find(key) != wait_address_tasks.end()) {
+            // bug
+            wait_address_tasks_lock.release();
+            return;
+        }
+        wait_address_tasks.emplace(key, std::vector<ManagedTask*>());
+        wait_address_tasks_lock.release();
+    }
+
+    auto erase_wait_address(const void* const address) -> void {
+        const auto key = reinterpret_cast<uintptr_t>(address);
+
+        wait_address_tasks_lock.aquire();
+        const auto p = wait_address_tasks.find(key);
+        if(p == wait_address_tasks.end()) {
+            // bug
+            wait_address_tasks_lock.release();
+            return;
+        }
+        wait_address_tasks.erase(p);
+        wait_address_tasks_lock.release();
+    }
+
+    auto wait_address(const void* const address, Task* const task) -> void {
+        wait_address(address, container_of(task, &ManagedTask::task));
+    }
+
+    auto notify_address(const void* const address) -> void {
+        const auto key = reinterpret_cast<uintptr_t>(address);
+
+        auto tasks = std::vector<ManagedTask*>();
+
+        wait_address_tasks_lock.aquire();
+        const auto p = wait_address_tasks.find(key);
+        if(p == wait_address_tasks.end()) {
+            // bug
+            wait_address_tasks_lock.release();
+            return;
+        }
+        tasks = std::move(p->second);
+        wait_address_tasks_lock.release();
+
+        for(auto task : tasks) {
+            wakeup(task, -1);
+        }
+    }
+
     TaskManager() {
         auto& task   = new_managed_task();
         task.nice    = current_nice;
@@ -274,5 +362,9 @@ inline auto Task::sleep() -> Task& {
 inline auto Task::wakeup(const int nice) -> Task& {
     task_manager->wakeup(this, nice);
     return *this;
+}
+
+inline auto Task::wait_address(const void* const address) -> void {
+    task_manager->wait_address(address, this);
 }
 } // namespace task

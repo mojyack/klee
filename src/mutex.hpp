@@ -8,12 +8,21 @@ class Mutex {
   public:
     auto aquire() -> void {
         while(flag.test_and_set()) {
-            task::task_manager->get_current_task().sleep();
+            task::task_manager->get_current_task().wait_address(this);
         }
     }
 
     auto release() -> void {
         flag.clear();
+        task::task_manager->notify_address(this);
+    }
+
+    Mutex() {
+        task::task_manager->add_wait_address(this);
+    }
+
+    ~Mutex() {
+        task::task_manager->erase_wait_address(this);
     }
 };
 
