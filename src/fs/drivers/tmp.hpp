@@ -139,7 +139,7 @@ class Directory : public Object {
 
     auto find_nth(const size_t index) const -> Result<const std::variant<File, Directory>*> {
         if(index >= children.size()) {
-            return Error::Code::IndexOutOfRange;
+            return Error::Code::EndOfFile;
         }
 
         const auto i = std::next(children.begin(), index);
