@@ -4,7 +4,7 @@
 
 class Error {
   public:
-    enum class Code {
+    enum class Code : int {
         Success = 0,
         Full,
         Empty,
@@ -27,6 +27,27 @@ class Error {
         NoWaiter,
         NoPCIMSI,
         NoSuchTask,
+        BadChecksum,
+        // filesystem
+        IOError,
+        InvalidData,
+        InvalidSector,
+        NotDirectory,
+        NotFile,
+        NoSuchFile,
+        FileExists,
+        FileOpened,
+        FileNotOpened,
+        VolumeMounted,
+        VolumeBusy,
+        NotMounted,
+        EndOfFile,
+        // FAT
+        NotFAT,
+        // block
+        NotMBR,
+        NotGPT,
+        UnsupportedGPT,
         // virtio
         VirtIOLegacyDevice,
         VirtIODeviceNotReady,
@@ -39,6 +60,14 @@ class Error {
   public:
     operator bool() const {
         return code != Code::Success;
+    }
+
+    auto operator==(const Code code) const -> bool {
+        return code == this->code;
+    }
+
+    auto as_int() const -> unsigned int {
+        return static_cast<unsigned int>(code);
     }
 
     Error(const Code code) : code(code) {}
