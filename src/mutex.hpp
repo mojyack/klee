@@ -60,3 +60,24 @@ class Critical {
     Critical(Args&&... args) : T(std::move(args)...) {}
     Critical() {}
 };
+
+class Event {
+  private:
+    task::Task*      task;
+    std::atomic_flag flag;
+
+  public:
+    auto wait() -> void {
+        flag.clear();
+        while(!flag.test()) {
+            task->sleep();
+        }
+    }
+    auto notify() -> void {
+        flag.test_and_set();
+        task->wakeup();
+    }
+
+    Event(): task(&task::task_manager->get_current_task()) {}
+    Event(task::Task& task) : task(&task) {}
+};

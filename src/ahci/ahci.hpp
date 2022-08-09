@@ -4,6 +4,7 @@
 #include "../interrupt.hpp"
 #include "../log.hpp"
 #include "../memory-manager.hpp"
+#include "../mutex.hpp"
 #include "../pci.hpp"
 #include "ata.hpp"
 #include "fis.hpp"
@@ -38,6 +39,7 @@ class SATADevice {
 
     struct CommandHeaderResource {
         std::unique_ptr<uint8_t> command_table;
+        Event*                   on_complete;
 
         auto construct_command_table(const size_t num_prd) -> internal::CommandTable& {
             const auto size = sizeof(internal::CommandTable) + sizeof(internal::PRDTEntry) * num_prd;
@@ -79,7 +81,7 @@ class SATADevice {
         return {command_list.get()[slot], command_list_resources[slot]};
     }
 
-    auto emit_h2d_command(uint8_t* buffer, size_t buffer_size, const size_t bytes_transfer, const internal::RegH2DFIS& cfis, const Operation operation) -> bool {
+    auto emit_h2d_command(uint8_t* buffer, size_t buffer_size, const size_t bytes_transfer, const internal::RegH2DFIS& cfis, const Operation operation, Event* const on_complete) -> bool {
         using namespace internal;
 
         const auto slot = port->find_lazy_command_slot(num_command_slots);
@@ -98,6 +100,7 @@ class SATADevice {
 
         auto [command_header, resource] = get_command_header_at(slot);
         auto& command_table             = resource.construct_command_table(num_prd);
+        resource.on_complete            = on_complete;
 
         command_header.cfl   = sizeof(RegH2DFIS) / sizeof(uint32_t);
         command_header.w     = 0;
@@ -163,11 +166,9 @@ class SATADevice {
                 running_operations[slot] = Operation::None;
             } break;
             case Operation::Read:
-                wait_compelete(slot);
-                running_operations[slot] = Operation::None;
-                break;
             case Operation::Write:
                 wait_compelete(slot);
+                command_list_resources[slot].on_complete->notify();
                 running_operations[slot] = Operation::None;
                 break;
             }
@@ -187,10 +188,10 @@ class SATADevice {
 
         identify_buffer.reset(new uint8_t[512]);
 
-        return emit_h2d_command(identify_buffer.get(), 512, 512, cfis, Operation::Identify);
+        return emit_h2d_command(identify_buffer.get(), 512, 512, cfis, Operation::Identify, nullptr);
     }
 
-    auto read(const uint64_t sector, const uint32_t count, uint8_t* buffer, size_t buffer_size) -> bool {
+    auto read(const uint64_t sector, const uint32_t count, uint8_t* buffer, size_t buffer_size, Event& on_complete) -> bool {
         using namespace internal;
 
         auto cfis = RegH2DFIS();
@@ -202,10 +203,10 @@ class SATADevice {
         cfis.command  = ata::Commands::ReadDMAExt;
         set_cfis_lba(cfis, sector, count);
 
-        return emit_h2d_command(buffer, buffer_size, count * bytes_per_sector, cfis, Operation::Read);
+        return emit_h2d_command(buffer, buffer_size, count * bytes_per_sector, cfis, Operation::Read, &on_complete);
     }
 
-    auto write(const uint64_t sector, const uint32_t count, uint8_t* buffer, size_t buffer_size) -> bool {
+    auto write(const uint64_t sector, const uint32_t count, uint8_t* buffer, size_t buffer_size, Event& on_complete) -> bool {
         using namespace internal;
 
         auto cfis = RegH2DFIS();
@@ -217,7 +218,7 @@ class SATADevice {
         cfis.command  = ata::Commands::WriteDMAExt;
         set_cfis_lba(cfis, sector, count);
 
-        return emit_h2d_command(buffer, buffer_size, count * bytes_per_sector, cfis, Operation::Write);
+        return emit_h2d_command(buffer, buffer_size, count * bytes_per_sector, cfis, Operation::Write, &on_complete);
     }
 };
 

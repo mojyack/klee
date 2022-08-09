@@ -78,7 +78,7 @@ class Task {
     }
 
     auto sleep() -> Task&;
-    auto wakeup() -> Task&;
+    auto wakeup(int nice = -1) -> Task&;
 
     Task(const uint64_t id) : id(id) {}
 };
@@ -271,8 +271,8 @@ inline auto Task::sleep() -> Task& {
     return *this;
 }
 
-inline auto Task::wakeup() -> Task& {
-    task_manager->wakeup(this);
+inline auto Task::wakeup(const int nice) -> Task& {
+    task_manager->wakeup(this, nice);
     return *this;
 }
 } // namespace task
