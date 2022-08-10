@@ -10,6 +10,8 @@
 #include "mutex.hpp"
 #include "type.hpp"
 
+#include "debug.hpp"
+
 inline auto refresh() -> void {
     __asm__("cli");
     task::kernel_task->send_message(MessageType::RefreshScreen);

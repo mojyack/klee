@@ -77,16 +77,21 @@ class Event {
 
   public:
     auto wait() -> void {
-        flag.clear();
         while(!flag.test()) {
             task->sleep();
         }
     }
+
     auto notify() -> void {
         flag.test_and_set();
         task->wakeup();
     }
+    
+    auto reset() -> void {
+        flag.clear();
+    }
 
     Event(): task(&task::task_manager->get_current_task()) {}
+
     Event(task::Task& task) : task(&task) {}
 };

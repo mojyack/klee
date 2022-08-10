@@ -240,6 +240,7 @@ class Controller {
   public:
     auto on_interrupt() -> void {
         const auto f = hba->is;
+        printk("intr\n");
         for(auto i = 0; i < available_ports.size() && available_ports[i] != -1; i += 1) {
             if(f & (1u << available_ports[i])) {
                 ports[i].on_interrupt();

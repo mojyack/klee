@@ -185,6 +185,7 @@ class Kernel {
         if(virtio_gpu != nullptr) {
             if(auto result = virtio::gpu::initialize(*virtio_gpu)) {
                 gpu_device.emplace(std::move(result.as_value()));
+                debug::fb = fb.get();
             } else {
                 logger(LogLevel::Error, "failed to initilize virtio gpu: %d", result.as_error());
             }
@@ -209,16 +210,16 @@ class Kernel {
         refresh();
 
         auto refresh_screen_done = true;
+        auto refresh_pending     = false;
 
     loop:
         __asm__("cli");
         const auto message = task::kernel_task->receive_message();
+        __asm__("sti");
         if(!message) {
             task::kernel_task->sleep();
-            __asm__("sti");
             goto loop;
         }
-        __asm__("sti");
 
         switch(message->type) {
         case MessageType::XHCIInterrupt:
@@ -267,14 +268,19 @@ class Kernel {
         } break;
         case MessageType::RefreshScreen:
             if(!refresh_screen_done) {
+                refresh_pending = true;
                 break;
             }
             refresh_screen_done = false;
+            refresh_pending     = false;
             window_manager->refresh(focused_window);
             framebuffer->swap();
             break;
         case MessageType::RefreshScreenDone:
             refresh_screen_done = true;
+            if(refresh_pending) {
+                refresh();
+            }
             break;
         case MessageType::ScreenResized: {
             const auto [w, h] = framebuffer->get_size();

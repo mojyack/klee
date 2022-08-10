@@ -5,6 +5,8 @@
 #include "../window-manager.hpp"
 #include "standard-window.hpp"
 
+#include "../debug.hpp"
+
 namespace terminal {
 static auto split(const std::string_view str) -> std::vector<std::string_view> {
     auto       result = std::vector<std::string_view>();
@@ -255,7 +257,6 @@ class Terminal : public StandardWindow {
             row += 1;
         } else {
             head  = (head + 1) % buffer.size();
-            dirty = true;
             enqueue_draw(DrawOp::Scroll{});
             draw_cursor(row, column, true);
         }

@@ -32,6 +32,7 @@ class Device : public BlockDevice {
 
         auto new_cache = SectorCache(sector_size);
         error_or(parent.read_sector(sector, 1, new_cache.data.get()));
+
         return &cache.emplace(sector, std::move(new_cache)).first->second;
     }
 
