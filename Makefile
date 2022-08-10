@@ -11,7 +11,9 @@ $(warning BUILDENV is not set)
 BUILDENV = ../klee-buildenv/x86_64-elf
 endif
 
-.PHONY: all run clean
+.PHONY: all run apps clean
+
+all: run
 
 out/loader.efi: KleeLoaderPkg/main.c KleeLoaderPkg/elf.c KleeLoaderPkg/memory.c
 	mkdir -p out
@@ -53,10 +55,15 @@ out/volume:
 	mkdir -p out
 	scripts/createimage.sh $@
 
-run_prep: out/volume out/loader.efi out/kernel.elf ovmf/OVMF.fd
+apps:
+	$(MAKE) -C apps all
+
+run_prep: out/volume out/loader.efi out/kernel.elf apps ovmf/OVMF.fd
 	mkdir -p out/root/EFI/BOOT
 	cp out/loader.efi out/root/EFI/BOOT/BOOTX64.EFI
 	cp out/kernel.elf out/root/kernel.elf
+	mkdir -p out/root/apps
+	cp -r out/apps/* out/root/apps
 	scripts/copyfiles.sh out/volume out/root
 
 run: run_prep

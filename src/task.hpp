@@ -7,6 +7,7 @@
 
 #include "asmcode.h"
 #include "error.hpp"
+#include "memory-manager.hpp"
 #include "message.hpp"
 #include "print.hpp"
 #include "segment.hpp"
@@ -30,11 +31,17 @@ class Task {
     std::deque<Message>   messages;
     alignas(16) TaskContext context;
 
+    SmartFrameID code;
+
   public:
     static constexpr auto default_stack_bytes = size_t(4096);
 
     auto get_id() const -> uint64_t {
         return id;
+    }
+
+    auto asign_code_frame(SmartFrameID code) -> void {
+        this->code = std::move(code);
     }
 
     auto init_context(TaskEntry* func, const int64_t data) -> Task& {
@@ -91,9 +98,9 @@ class SpinLock {
 
   public:
     auto aquire() -> void {
-        //while(flag.test_and_set()) {
-        //    //
-        //}
+        // while(flag.test_and_set()) {
+        //     //
+        // }
     }
 
     auto release() -> void {

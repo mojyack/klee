@@ -40,6 +40,15 @@ static auto split(const std::string_view str) -> std::vector<std::string_view> {
     return result;
 }
 
+#define handle_or(path)                                             \
+    auto& root          = commands::get_filesystem_root();          \
+    auto  handle_result = root.open(path, fs::OpenMode::Read);      \
+    if(!handle_result) {                                            \
+        print("open error: %d", handle_result.as_error().as_int()); \
+        return;                                                     \
+    }                                                               \
+    auto& handle = handle_result.as_value();
+
 class Shell {
   private:
     static constexpr auto                 prompt = "> ";
@@ -110,12 +119,7 @@ class Shell {
             if(argv.size() == 2) {
                 path = argv[1];
             }
-            auto& root          = commands::get_filesystem_root();
-            auto  handle_result = root.open(path, fs::OpenMode::Read);
-            if(!handle_result) {
-                print("open error: %d\n", handle_result.as_error().as_int());
-            }
-            auto& handle = handle_result.as_value();
+            handle_or(path);
             for(auto i = 0;; i += 1) {
                 const auto r = handle.readdir(i);
                 if(!r) {
@@ -135,18 +139,7 @@ class Shell {
                 puts("usage: cat FILE");
                 return;
             }
-            auto& root          = commands::get_filesystem_root();
-            auto  handle_result = root.open(argv[1], fs::OpenMode::Read);
-            if(!handle_result) {
-                print("open error: %d", handle_result.as_error().as_int());
-                return;
-            }
-            auto& handle = handle_result.as_value();
-            if(handle.get_filesize() == 0) {
-                puts("(empty file)\n");
-                return;
-            }
-            print("size %lu\n", handle.get_filesize());
+            handle_or(argv[1]);
             for(auto i = size_t(0); i < handle.get_filesize(); i += 1) {
                 auto c = char();
                 if(const auto e = handle.read(i, 1, &c)) {
@@ -170,6 +163,28 @@ class Shell {
                     break;
                 }
             }
+        } else if(argv[0] == "run") {
+            if(argv.size() != 2) {
+                puts("usage: run FILE");
+                return;
+            }
+            handle_or(argv[1]);
+            const auto num_frames         = (handle.get_filesize() + bytes_per_frame - 1) / bytes_per_frame;
+            auto       code_frames_result = allocator->allocate(num_frames);
+            if(!code_frames_result) {
+                print("failed to allocate frames for code: %d\n", code_frames_result.as_error());
+                return;
+            }
+            auto code_frames = SmartFrameID(code_frames_result.as_value(), num_frames);
+            if(const auto e = handle.read(0, handle.get_filesize(), code_frames->get_frame())) {
+                print("file read error: %d\n", e.as_int());
+                return;
+            }
+
+            auto& task = task::task_manager->new_task();
+            task.init_context(reinterpret_cast<task::TaskEntry*>(code_frames->get_frame()), 0);
+            task.asign_code_frame(std::move(code_frames));
+            task.wakeup();
         } else {
             puts("unknown command");
         }
@@ -202,6 +217,8 @@ class Shell {
         puts(prompt);
     }
 };
+
+#undef handle_or
 } // namespace terminal
 
 class Terminal : public StandardWindow {
@@ -256,7 +273,7 @@ class Terminal : public StandardWindow {
             }
             row += 1;
         } else {
-            head  = (head + 1) % buffer.size();
+            head = (head + 1) % buffer.size();
             enqueue_draw(DrawOp::Scroll{});
             draw_cursor(row, column, true);
         }
