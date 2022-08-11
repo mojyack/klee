@@ -69,7 +69,7 @@ class Kernel {
         setup_segments();
         set_dsall(kernel_ds);
         set_csss(kernel_cs, kernel_ss);
-        setup_identity_page_table();
+        paging::setup_identity_page_table();
         memory_manager.initialize_heap();
 
         // set global objects
@@ -209,7 +209,6 @@ class Kernel {
             term.init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
             term.wakeup();
         }
-        
 
         printk("klee.\n");
         refresh();

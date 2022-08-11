@@ -144,6 +144,7 @@ class Shell {
                 auto c = char();
                 if(const auto e = handle.read(i, 1, &c)) {
                     print("read error: %d\n", e.as_int());
+                    root.close(handle);
                     return;
                 }
                 if(c >= 0x20) {
@@ -163,6 +164,7 @@ class Shell {
                     break;
                 }
             }
+            root.close(handle);
         } else if(argv[0] == "run") {
             if(argv.size() != 2) {
                 puts("usage: run FILE");
@@ -173,21 +175,25 @@ class Shell {
             auto       code_frames_result = allocator->allocate(num_frames);
             if(!code_frames_result) {
                 print("failed to allocate frames for code: %d\n", code_frames_result.as_error());
+                root.close(handle);
                 return;
             }
             auto code_frames = SmartFrameID(code_frames_result.as_value(), num_frames);
             if(const auto e = handle.read(0, handle.get_filesize(), code_frames->get_frame())) {
                 print("file read error: %d\n", e.as_int());
+                root.close(handle);
                 return;
             }
 
             auto& task = task::task_manager->new_task();
             if(const auto e = task.asign_code_frame(std::move(code_frames))) {
                 print("asign code error: %d\n", e.as_int());
+                root.close(handle);
                 return;
             }
             task.init_context(nullptr, 0);
             task.wakeup();
+            root.close(handle);
         } else {
             puts("unknown command");
         }
