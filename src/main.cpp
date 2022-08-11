@@ -204,7 +204,12 @@ class Kernel {
         }
 
         // open terminal
-        task::task_manager->new_task().init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer))).wakeup();
+        {
+            auto& term = task::task_manager->new_task();
+            term.init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
+            term.wakeup();
+        }
+        
 
         printk("klee.\n");
         refresh();

@@ -28,6 +28,7 @@ class Error {
         NoPCIMSI,
         NoSuchTask,
         BadChecksum,
+        EntryNotSet,
         // filesystem
         IOError,
         InvalidData,
@@ -54,6 +55,9 @@ class Error {
         VirtIOLegacyDevice,
         VirtIODeviceNotReady,
         LastOfCode,
+        // elf
+        NotELF,
+        InvalidELF,
     };
 
   private:

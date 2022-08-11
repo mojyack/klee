@@ -185,6 +185,10 @@ class SmartFrameID {
     size_t  frames;
 
   public:
+    auto get_frames() const -> size_t {
+        return frames;
+    }
+
     auto operator=(SmartFrameID&& o) -> SmartFrameID& {
         if(id != nullframe) {
             allocator->deallocate(id, frames);

@@ -1,14 +1,14 @@
 SHELL = /bin/zsh
 LLVM_VERSION = 14.0.4
 TARGET = x86_64-elf
-INCLUDES = -I${BUILDENV}/include -I${BUILDENV}/include/freetype2 -I${BUILDENV}/include/c++/v1 -I$(abspath edk2/MdePkg/Include) -I$(abspath edk2/MdePkg/Include/X64)
-COMMON_FLAGS = -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
-CXX = clang++ -O3 -Wall -ffreestanding -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 -Wno-address-of-packed-member -march=x86-64-v2 --target=${TARGET} ${INCLUDES} ${COMMON_FLAGS} -c
-LIBRARY = ${BUILDENV}/lib
+INCLUDES = $(addprefix -I, $(BUILDENV)/include $(BUILDENV)/include/freetype2 $(BUILDENV)/include/c++/v1 $(abspath edk2/MdePkg/Include) $(abspath edk2/MdePkg/Include/X64))
+COMMON_FLAGS = -O3 -Wall --target=$(TARGET) -nostdlibinc -ffreestanding -U__linux__ -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
+CXX = clang++ -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 -Wno-address-of-packed-member -march=x86-64-v2 $(INCLUDES) $(COMMON_FLAGS) -c
+LIBRARY = $(BUILDENV)/lib
 
 ifndef BUILDENV
 $(warning BUILDENV is not set)
-BUILDENV = ../klee-buildenv/x86_64-elf
+BUILDENV = $(abspath ../klee-buildenv/x86_64-elf)
 endif
 
 .PHONY: all run apps clean
@@ -56,7 +56,7 @@ out/volume:
 	scripts/createimage.sh $@
 
 apps:
-	$(MAKE) -C apps all
+	$(MAKE) -C apps INCLUDES="$(INCLUDES)" COMMON_FLAGS="$(COMMON_FLAGS)" all
 
 run_prep: out/volume out/loader.efi out/kernel.elf apps ovmf/OVMF.fd
 	mkdir -p out/root/EFI/BOOT

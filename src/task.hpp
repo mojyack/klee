@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "asmcode.h"
+#include "elf.hpp"
 #include "error.hpp"
 #include "memory-manager.hpp"
 #include "message.hpp"
@@ -31,6 +32,7 @@ class Task {
     std::deque<Message>   messages;
     alignas(16) TaskContext context;
 
+    TaskEntry*   entry = nullptr;
     SmartFrameID code;
 
   public:
@@ -40,11 +42,26 @@ class Task {
         return id;
     }
 
-    auto asign_code_frame(SmartFrameID code) -> void {
-        this->code = std::move(code);
+    auto asign_code_frame(SmartFrameID new_code) -> Error {
+        code = std::move(new_code);
+        if(const auto r = elf::load_elf(code)) {
+            entry = reinterpret_cast<TaskEntry*>(r.as_value());
+        } else if(r.as_error() == Error::Code::NotELF) {
+            entry = reinterpret_cast<TaskEntry*>(code->get_frame());
+        } else {
+            return r.as_error();
+        }
+        return Error();
     }
 
-    auto init_context(TaskEntry* func, const int64_t data) -> Task& {
+    auto init_context(TaskEntry* func, const int64_t data) -> Error {
+        if(func == nullptr) {
+            if(entry == nullptr) {
+                return Error::Code::EntryNotSet;
+            }
+            func = entry;
+        }
+
         const auto stack_size = default_stack_bytes / sizeof(stack[0]);
         stack.resize(stack_size);
         const auto stack_end = reinterpret_cast<uint64_t>(&stack[stack_size]);
@@ -63,7 +80,7 @@ class Task {
         // mask all exceptions of MXCSR
         *reinterpret_cast<uint32_t*>(&context.fxsave_area[24]) = 0x1f80;
 
-        return *this;
+        return Error();
     }
 
     auto get_context() -> TaskContext& {

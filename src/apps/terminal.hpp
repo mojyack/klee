@@ -182,8 +182,11 @@ class Shell {
             }
 
             auto& task = task::task_manager->new_task();
-            task.init_context(reinterpret_cast<task::TaskEntry*>(code_frames->get_frame()), 0);
-            task.asign_code_frame(std::move(code_frames));
+            if(const auto e = task.asign_code_frame(std::move(code_frames))) {
+                print("asign code error: %d\n", e.as_int());
+                return;
+            }
+            task.init_context(nullptr, 0);
             task.wakeup();
         } else {
             puts("unknown command");
