@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 
-#include "../interrupt.hpp"
+#include "../interrupt/vector.hpp"
 #include "../log.hpp"
 #include "../memory-manager.hpp"
 #include "../mutex.hpp"
@@ -363,7 +363,7 @@ inline auto initialize(const pci::Device& dev) -> std::optional<Controller> {
     }
 
     const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
-    if(const auto error = dev.configure_msi_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::InterruptVector::Number::AHCI, 0)) {
+    if(const auto error = dev.configure_msi_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::AHCI, 0)) {
         logger(LogLevel::Error, "[ahci] failed to setup msi(%d)\n", error);
     }
     return Controller(hba_header, std::move(devices));

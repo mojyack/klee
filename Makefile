@@ -81,7 +81,10 @@ run: run_prep
 	-device qemu-xhci \
 	-device usb-mouse -device usb-kbd \
 	-nic none \
-	-monitor stdio -d guest_errors
+	-monitor stdio \
+	-d guest_errors \
+	-d int \
+	-no-reboot -no-shutdown
 	#-vga virtio \
 
 run_debug: run_prep

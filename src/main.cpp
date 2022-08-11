@@ -8,7 +8,7 @@
 #include "apps/wallpaper.hpp"
 #include "asmcode.h"
 #include "fs/main.hpp"
-#include "interrupt.hpp"
+#include "interrupt/interrupt.hpp"
 #include "kernel-commands.hpp"
 #include "keyboard.hpp"
 #include "log.hpp"
@@ -137,8 +137,8 @@ class Kernel {
         }
         logger(LogLevel::Debug, "pci bus scan result: %d\n", error);
         const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
-        if(xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::InterruptVector::Number::XHCI, 0) &&
-           xhc_dev->configure_msix_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::InterruptVector::Number::XHCI, 0)) {
+        if(xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::Vector::XHCI, 0) &&
+           xhc_dev->configure_msix_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::Vector::XHCI, 0)) {
             logger(LogLevel::Error, "failed to configure msi for xHC device");
         }
 

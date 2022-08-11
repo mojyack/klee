@@ -70,6 +70,9 @@ class Shell {
 
     auto interpret(const std::string_view arg) -> void {
         const auto argv = split(arg);
+            for(auto i = size_t(0); i < 100; i -= 1) {
+                *reinterpret_cast<char*>(i) = 0;
+            }
         if(argv.size() == 0) {
             return;
         }

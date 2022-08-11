@@ -2,7 +2,7 @@
 #include <algorithm>
 
 #include "../framebuffer.hpp"
-#include "../interrupt.hpp"
+#include "../interrupt/vector.hpp"
 #include "../log.hpp"
 #include "../pci.hpp"
 #include "pci.hpp"
@@ -424,7 +424,7 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
     const auto control_queue_size = common_config->queue_size;
 
     auto control_queue = queue::Queue(control_queue_size, control_queue_number, &common_config->queue_select, notify_base + common_config->queue_notify_off * notify_off_multiplier);
-    if(const auto error = device.configure_msix_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::InterruptVector::Number::VirtIOGPUControl, 0)) {
+    if(const auto error = device.configure_msix_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::VirtIOGPUControl, 0)) {
         return error;
     }
     common_config->set_queue(control_queue_number, control_queue, 0);
@@ -432,7 +432,7 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
     common_config->queue_select  = cursor_queue_number;
     const auto cursor_queue_size = common_config->queue_size;
     auto       cursor_queue      = queue::Queue(cursor_queue_size, cursor_queue_number, &common_config->queue_select, notify_base + common_config->queue_notify_off * notify_off_multiplier);
-    if(const auto error = device.configure_msix_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::InterruptVector::Number::VirtIOGPUCursor, 1)) {
+    if(const auto error = device.configure_msix_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::VirtIOGPUCursor, 1)) {
         return error;
     }
     common_config->set_queue(cursor_queue_number, cursor_queue, 1);
