@@ -1,6 +1,6 @@
 #pragma once
 #include <array>
-#include <cstddef>
+#include <unordered_map>
 
 #include "asmcode.h"
 
@@ -143,29 +143,50 @@ union PTEntry {
     PTEntry4KB frame;
 };
 
-constexpr auto page_direcotry_count = 64;
+constexpr auto bytes_per_page = 4096;
+
+using PageTable = std::array<PTEntry, 512>;
+
+struct PageDirectory {
+    alignas(4096) std::array<PDEntry, 512> data;
+    std::array<std::unique_ptr<PageTable*>, 512> resource = {nullptr};
+};
+
+struct PageDirectoryPointerTable {
+    alignas(4096) std::array<PDPTEntry, 512> data;
+    std::array<std::unique_ptr<PageDirectory*>, 512> resource = {nullptr};
+};
+
+struct PageMapLevel4Table {
+    alignas(4096) std::array<PML4Entry, 512> data;
+    std::array<std::unique_ptr<PageDirectoryPointerTable*>, 512> resource;
+};
 
 inline auto setup_identity_page_table() -> void {
-    using PageDirectory = std::array<PDEntry, 512>;
-
     constexpr auto page_size_4k = size_t(4096);
     constexpr auto page_size_2m = 512 * page_size_4k;
     constexpr auto page_size_1g = 512 * page_size_2m;
 
-    alignas(page_size_4k) static std::array<PML4Entry, 512>                      pml4_table;
-    alignas(page_size_4k) static std::array<PDPTEntry, 512>                      pdp_table;
-    alignas(page_size_4k) static std::array<PageDirectory, page_direcotry_count> page_directory;
+    using PageDirectory                               = std::array<PDEntry, 512>;
+    alignas(4096) static auto page_directory_resource = std::array<PageDirectory, 64>();
+    alignas(4096) static auto pdp_table               = std::array<PDPTEntry, 512>();
+    alignas(4096) static auto pml4_table              = std::array<PML4Entry, 512>();
 
     pml4_table[0].data              = reinterpret_cast<uint64_t>(pdp_table.data());
     pml4_table[0].directory.present = 1;
     pml4_table[0].directory.write   = 1;
 
-    for(auto i_pdpt = 0; i_pdpt < page_directory.size(); i_pdpt += 1) {
-        pdp_table[i_pdpt].data              = reinterpret_cast<uint64_t>(&page_directory[i_pdpt]);
-        pdp_table[i_pdpt].directory.present = 1;
-        pdp_table[i_pdpt].directory.write   = 1;
+    for(auto i_pdpt = 0; i_pdpt < page_directory_resource.size(); i_pdpt += 1) {
+        auto& pd   = page_directory_resource[i_pdpt];
+        auto& pdpe = pdp_table[i_pdpt];
+
+        pdpe.data              = reinterpret_cast<uint64_t>(&pd);
+        pdpe.directory.present = 1;
+        pdpe.directory.write   = 1;
+
         for(auto i_pd = 0; i_pd < 512; i_pd += 1) {
-            auto& pde           = page_directory[i_pdpt][i_pd];
+            auto& pde = pd[i_pd];
+
             pde.data            = i_pdpt * page_size_1g + i_pd * page_size_2m;
             pde.frame.present   = 1;
             pde.frame.write     = 1;
@@ -174,5 +195,25 @@ inline auto setup_identity_page_table() -> void {
     }
 
     set_cr3(reinterpret_cast<uint64_t>(pml4_table.data()));
+}
+
+inline auto split_addr_for_page_table(uintptr_t addr) -> std::array<uint16_t, 4> {
+    auto r = std::array<uint16_t, 4>();
+
+    addr = addr >> 11;
+    for(auto i = 0; i < 4; i += 1) {
+        r[i] = addr & 0x01FF;
+        addr = addr >> 9;
+    }
+    return r;
+}
+
+inline auto map_virtual_to_physical(std::array<PML4Entry, 512>& pml4_table, const uintptr_t virtual_addr, const uintptr_t physical_addr) -> void {
+    const auto [pml4, pdpt, pd, pt] = split_addr_for_page_table(virtual_addr);
+
+    // auto& pml4e             = *reinterpret_cast<PML4Entry*>(&pml4_table[pml4]);
+    // pml4e.directory.present = 1;
+    // pml4e.directory.write   = 1;
+    // pml4e.directory.addr    = ;
 }
 } // namespace paging
