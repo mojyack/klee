@@ -6,7 +6,6 @@
 #include "../asmcode.h"
 #include "../debug.hpp"
 #include "../message.hpp"
-#include "../task.hpp"
 #include "../timer.hpp"
 #include "../x86-descriptor.hpp"
 #include "fault_handlers.hpp"
@@ -44,7 +43,7 @@ __attribute__((no_caller_saved_registers)) inline auto notify_end_of_interrupt()
 inline auto timer_manager = (timer::TimerManager*)(nullptr);
 
 __attribute__((interrupt)) static auto int_handler_xhci(InterruptFrame* const frame) -> void {
-    task::kernel_task->send_message(MessageType::XHCIInterrupt);
+    task::kernel_task->send_message_may_fail(MessageType::XHCIInterrupt);
     notify_end_of_interrupt();
 }
 
@@ -53,22 +52,22 @@ __attribute__((interrupt)) static auto int_handler_lapic_timer(InterruptFrame* c
     notify_end_of_interrupt();
 
     if(task_switch) {
-        task::task_manager->switch_task();
+        task::task_manager->switch_task_may_fail();
     }
 }
 
 __attribute__((interrupt)) static auto int_handler_ahci(InterruptFrame* const frame) -> void {
-    task::kernel_task->send_message(MessageType::AHCIInterrupt);
+    task::kernel_task->send_message_may_fail(MessageType::AHCIInterrupt);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_control(InterruptFrame* const frame) -> void {
-    task::kernel_task->send_message(MessageType::VirtIOGPUControl);
+    task::kernel_task->send_message_may_fail(MessageType::VirtIOGPUControl);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_cursor(InterruptFrame* const frame) -> void {
-    task::kernel_task->send_message(MessageType::VirtIOGPUCursor);
+    task::kernel_task->send_message_may_fail(MessageType::VirtIOGPUCursor);
     notify_end_of_interrupt();
 }
 

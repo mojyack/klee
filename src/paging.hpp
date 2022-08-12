@@ -162,6 +162,8 @@ struct PageMapLevel4Table {
     std::array<std::unique_ptr<PageDirectoryPointerTable>, 512> resource;
 };
 
+alignas(4096) inline auto pml4_table = std::array<PML4Entry, 512>();
+
 inline auto setup_identity_page_table() -> void {
     constexpr auto page_size_4k = size_t(4096);
     constexpr auto page_size_2m = 512 * page_size_4k;
@@ -170,7 +172,6 @@ inline auto setup_identity_page_table() -> void {
     using PageDirectory                               = std::array<PDEntry, 512>;
     alignas(4096) static auto page_directory_resource = std::array<PageDirectory, 64>();
     alignas(4096) static auto pdp_table               = std::array<PDPTEntry, 512>();
-    alignas(4096) static auto pml4_table              = std::array<PML4Entry, 512>();
 
     pml4_table[0].data              = reinterpret_cast<uint64_t>(pdp_table.data());
     pml4_table[0].directory.present = 1;
@@ -200,7 +201,7 @@ inline auto setup_identity_page_table() -> void {
 inline auto split_addr_for_page_table(uintptr_t addr) -> std::array<uint16_t, 4> {
     auto r = std::array<uint16_t, 4>();
 
-    addr = addr >> 11;
+    addr = addr >> 12;
     for(auto i = 0; i < 4; i += 1) {
         r[i] = addr & 0x01FF;
         addr = addr >> 9;
@@ -208,16 +209,8 @@ inline auto split_addr_for_page_table(uintptr_t addr) -> std::array<uint16_t, 4>
     return r;
 }
 
-inline auto map_virtual_to_physical(PageMapLevel4Table& pml4_table, const uintptr_t virtual_addr, const uintptr_t physical_addr) -> void {
-    const auto [i_pml4, i_pdpt, i_pd, i_pt] = split_addr_for_page_table(virtual_addr);
-
-    auto& pdpt_resource = pml4_table.resource[i_pml4];
-    if(!pdpt_resource) {
-        pdpt_resource.reset(new PageDirectoryPointerTable);
-        pml4_table.data[i_pml4].data              = reinterpret_cast<uint64_t>(pdpt_resource->data.data());
-        pml4_table.data[i_pml4].directory.present = 1;
-        pml4_table.data[i_pml4].directory.write   = 1;
-    }
+inline auto map_virtual_to_physical(PageDirectoryPointerTable* pdpt_resource, const uintptr_t virtual_addr, const uintptr_t physical_addr) -> void {
+    const auto [i_pt, i_pd, i_pdpt, i_pml4] = split_addr_for_page_table(virtual_addr);
 
     auto& pd_resource = pdpt_resource->resource[i_pdpt];
     if(!pd_resource) {
@@ -229,7 +222,7 @@ inline auto map_virtual_to_physical(PageMapLevel4Table& pml4_table, const uintpt
 
     auto& pt_resource = pd_resource->resource[i_pd];
     if(!pt_resource) {
-        pt_resource.reset(new PageTable);
+        pt_resource.reset(new(std::align_val_t{4096}) PageTable);
         pd_resource->data[i_pd].data              = reinterpret_cast<uint64_t>(pt_resource->data());
         pd_resource->data[i_pd].directory.present = 1;
         pd_resource->data[i_pd].directory.write   = 1;
@@ -239,5 +232,19 @@ inline auto map_virtual_to_physical(PageMapLevel4Table& pml4_table, const uintpt
     pte.data          = physical_addr;
     pte.frame.present = 1;
     pte.frame.write   = 1;
+}
+
+inline auto map_virtual_to_physical(PageMapLevel4Table& pml4_table, const uintptr_t virtual_addr, const uintptr_t physical_addr) -> void {
+    const auto [i_pt, i_pd, i_pdpt, i_pml4] = split_addr_for_page_table(virtual_addr);
+
+    auto& pdpt_resource = pml4_table.resource[i_pml4];
+    if(!pdpt_resource) {
+        pdpt_resource.reset(new PageDirectoryPointerTable);
+        pml4_table.data[i_pml4].data              = reinterpret_cast<uint64_t>(pdpt_resource->data.data());
+        pml4_table.data[i_pml4].directory.present = 1;
+        pml4_table.data[i_pml4].directory.write   = 1;
+    }
+
+    return map_virtual_to_physical(pdpt_resource.get(), virtual_addr, physical_addr);
 }
 } // namespace paging

@@ -223,7 +223,6 @@ inline auto main(const uint64_t id, const int64_t data) -> void {
     };
 
     printk("[fs] initialize done\n");
-
     auto& this_task = task::task_manager->get_current_task();
     while(true) {
         const auto message = this_task.receive_message();

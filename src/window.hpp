@@ -136,7 +136,7 @@ class Window {
     virtual auto is_grabbable(const Point point) const -> bool = 0;
 
     auto lock_window_resources() -> SmartMutex {
-        return &mutex;
+        return mutex;
     }
 
     auto set_position(const Point new_pos) -> void {

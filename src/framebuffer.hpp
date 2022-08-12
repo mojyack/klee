@@ -2,7 +2,7 @@
 #include <array>
 
 #include "type.hpp"
-#include "task.hpp"
+#include "task/manager.hpp"
 
 class Framebuffer {
   private:
@@ -13,7 +13,7 @@ class Framebuffer {
     virtual auto do_swap(bool flip) -> bool                       = 0;
 
     auto notify_refresh_done() -> void {
-        task::kernel_task->send_message(MessageType::RefreshScreenDone);
+       task::kernel_task->send_message(MessageType::RefreshScreenDone);
     }
 
   public:

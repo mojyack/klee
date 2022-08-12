@@ -150,6 +150,7 @@ switch_context:
 
     mov rdi, [rdi + 0x60]
 
+    cli
     o64 iret
 
 extern kernel_main_stack

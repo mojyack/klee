@@ -7,6 +7,7 @@
 #include "apps/terminal.hpp"
 #include "apps/wallpaper.hpp"
 #include "asmcode.h"
+#include "debug.hpp"
 #include "fs/main.hpp"
 #include "interrupt/interrupt.hpp"
 #include "kernel-commands.hpp"
@@ -20,7 +21,6 @@
 #include "pci.hpp"
 #include "print.hpp"
 #include "segment.hpp"
-#include "task.hpp"
 #include "timer.hpp"
 #include "uefi/gop-framebuffer.hpp"
 #include "usb/classdriver/hid.hpp"
@@ -197,20 +197,18 @@ class Kernel {
         }
 
         // open filesystem manager
-        {
-            auto& fs = task::task_manager->new_task();
-            fs.init_context(fs::main, reinterpret_cast<int64_t>(&sata_controller.value()));
-            fs.wakeup(1);
-        }
+        //{
+        auto& fs = task::task_manager->new_task();
+        fs.init_context(fs::main, reinterpret_cast<int64_t>(&sata_controller.value()));
+        fs.wakeup(1);
+        //}
 
         // open terminal
-        {
-            auto& term = task::task_manager->new_task();
-            term.init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
-            term.wakeup();
-        }
-
-        printk("klee.\n");
+        //{
+        auto& term = task::task_manager->new_task();
+        term.init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
+        term.wakeup();
+        //}
         refresh();
 
         auto refresh_screen_done = true;
@@ -224,6 +222,11 @@ class Kernel {
             task::kernel_task->sleep();
             goto loop;
         }
+        //if(message->type != MessageType::RefreshScreenDone) {
+        //    auto buf = std::array<char, 128>();
+        //    snprintf(buf.data(), buf.size(), "loop %d %p %p %p", message->type, task::kernel_task, &fs, &term);
+        //    debug::debug_print(buf.data());
+        //}
 
         switch(message->type) {
         case MessageType::XHCIInterrupt:

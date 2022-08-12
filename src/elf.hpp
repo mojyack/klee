@@ -1,8 +1,11 @@
 #pragma once
 #include <cstring>
 #include <limits>
+#include <vector>
 
 #include "memory-manager.hpp"
+#include "paging.hpp"
+#include "task/task.hpp"
 
 namespace elf {
 struct ELF {
@@ -40,19 +43,27 @@ struct ProgramHeader {
 } __attribute__((packed));
 
 #define assert(c, e) \
-    if(!(c)) {          \
+    if(!(c)) {       \
         return e;    \
     }
 
-inline auto load_elf(SmartFrameID& image) -> Result<void*> {
-    const auto bytes_limit = image.get_frames() * bytes_per_frame;
+struct LoadedELF {
+    std::vector<SmartFrameID> allocated_frames;
+    void*                     entry;
+};
 
-    auto& elf = *reinterpret_cast<ELF*>(image->get_frame());
+static_assert(paging::bytes_per_page == bytes_per_frame);
+
+inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdpt, task::Task& task) -> Result<LoadedELF> {
+    const auto bytes_limit = image.get_frames() * bytes_per_frame;
+    const auto image_addr  = reinterpret_cast<uint8_t*>(image->get_frame());
+
+    auto& elf = *reinterpret_cast<ELF*>(image_addr);
     assert(memcmp(elf.magic, "\177ELF", 4) == 0, Error::Code::NotELF);
     assert(elf.program_header_size >= sizeof(ProgramHeader), Error::Code::InvalidELF);
     assert(elf.program_header_address + elf.program_header_size * elf.program_header_limit <= bytes_limit, Error::Code::InvalidELF);
 
-    const auto program_headers = static_cast<uint8_t*>(image->get_frame()) + elf.program_header_address;
+    const auto program_headers = image_addr + elf.program_header_address;
     auto       segment_first   = std::numeric_limits<uint64_t>::max();
     auto       segment_last    = size_t(0);
 
@@ -62,46 +73,46 @@ inline auto load_elf(SmartFrameID& image) -> Result<void*> {
             // not a loadable segment
             continue;
         }
-        printk("segment found: %X %X +%X\n", ph.offset, ph.p_address, ph.memsize);
         segment_first = std::min(segment_first, ph.p_address);
         segment_last  = std::max(segment_last, ph.p_address + ph.memsize);
     }
-    return reinterpret_cast<void*>(static_cast<uint8_t*>(image->get_frame()) + 0x120/*elf.entry_address*/);
+    segment_first = segment_first & 0xFFFF'FFFF'FFFF'F000;
 
-    /*
-    struct ELF*           elf             = (struct ELF*)(file_load_addr);
-    struct ProgramHeader* program_headers = (struct ProgramHeader*)(file_load_addr + elf->program_header_address);
-    {
-        EFI_PHYSICAL_ADDRESS first = MAX_UINT64;
-        EFI_PHYSICAL_ADDRESS last  = 0;
-        for(struct ProgramHeader* program_header = program_headers; program_header < program_headers + elf->program_header_limit; program_header += 1) {
-            if(program_header->type != 0x01) {
-                // not a loadable segment
-                continue;
-            }
-            Print(L"[elf] program_header: offset 0x%0lx, address 0x%0lx, filesize 0x%0lx, memsize 0x%0lx\n", program_header->offset, program_header->p_address, program_header->filesize, program_header->memsize);
-            first = MIN(first, program_header->p_address);
-            last  = MAX(last, program_header->p_address + program_header->memsize);
+    const auto num_frames       = (segment_last - segment_first + bytes_per_frame - 1) / bytes_per_frame;
+    auto       allocated_frames = std::vector<SmartFrameID>(num_frames);
+    for(auto i = 0; i < allocated_frames.size(); i += 1) {
+        auto& f = allocated_frames[i];
+
+        const auto new_frame = allocator->allocate(1);
+        if(!new_frame) {
+            return new_frame.as_error();
         }
-        assert(allocate_address(first, last - first), L"failed to allocate pages for program segment");
-        for(struct ProgramHeader* program_header = program_headers; program_header < program_headers + elf->program_header_limit; program_header += 1) {
-            if(program_header->type != 0x01) {
-                // not a loadable segment
-                continue;
-            }
-            EFI_PHYSICAL_ADDRESS address  = program_header->p_address;
-            EFI_PHYSICAL_ADDRESS offset   = program_header->offset;
-            UINT64               filesize = program_header->filesize;
-            UINT64               memsize  = program_header->memsize;
-            UINT64               padding  = memsize - filesize;
-            CopyMem((VOID*)address, (VOID*)(file_load_addr + offset), filesize);
-            SetMem((VOID*)(address + filesize), padding, 0);
-        }
+        f = SmartFrameID(new_frame.as_value(), 1);
+
+        const auto physical_addr = reinterpret_cast<uint64_t>(f->get_frame());
+        const auto virtual_addr  = segment_first + paging::bytes_per_page * i;
+        paging::map_virtual_to_physical(&pdpt, virtual_addr, physical_addr);
     }
-    *entry = elf->entry_address;
-    assert(free_pool((VOID*)file_load_addr), L"failed to free pool");
-    return EFI_SUCCESS;
-    */
+
+    task.apply_page_map();
+
+    for(auto i = 0; i < elf.program_header_limit; i += 1) {
+        const auto& ph = *reinterpret_cast<ProgramHeader*>(program_headers + elf.program_header_size * i);
+        if(ph.type != 0x01) {
+            continue;
+        }
+        const auto address  = reinterpret_cast<uint8_t*>(ph.p_address);
+        const auto offset   = ph.offset;
+        const auto filesize = ph.filesize;
+        const auto memsize  = ph.memsize;
+        const auto padding  = memsize - filesize;
+
+        assert(offset + memsize <= bytes_limit, Error::Code::InvalidELF);
+        memcpy(address, image_addr + offset, filesize);
+        memset(address + filesize, 0, padding);
+    }
+
+    return LoadedELF{std::move(allocated_frames), reinterpret_cast<void*>(elf.entry_address)};
 }
 
 #undef assert

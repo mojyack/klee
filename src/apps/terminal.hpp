@@ -1,6 +1,7 @@
 #pragma once
 #include "../kernel-commands.hpp"
 #include "../mutex.hpp"
+#include "../task/elf-startup.hpp"
 #include "../util/variant.hpp"
 #include "../window-manager.hpp"
 #include "standard-window.hpp"
@@ -70,9 +71,6 @@ class Shell {
 
     auto interpret(const std::string_view arg) -> void {
         const auto argv = split(arg);
-            for(auto i = size_t(0); i < 100; i -= 1) {
-                *reinterpret_cast<char*>(i) = 0;
-            }
         if(argv.size() == 0) {
             return;
         }
@@ -181,21 +179,19 @@ class Shell {
                 root.close(handle);
                 return;
             }
-            auto code_frames = SmartFrameID(code_frames_result.as_value(), num_frames);
-            if(const auto e = handle.read(0, handle.get_filesize(), code_frames->get_frame())) {
+            auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(code_frames_result.as_value(), num_frames));
+            if(const auto e = handle.read(0, handle.get_filesize(), (*code_frames)->get_frame())) {
                 print("file read error: %d\n", e.as_int());
                 root.close(handle);
                 return;
             }
 
-            auto& task = task::task_manager->new_task();
-            if(const auto e = task.asign_code_frame(std::move(code_frames))) {
-                print("asign code error: %d\n", e.as_int());
-                root.close(handle);
-                return;
+            {
+                auto& task = task::task_manager->new_task();
+                task.init_context(task::elf_startup, reinterpret_cast<uint64_t>(code_frames.get()));
+                [[maybe_unused]] const auto raw_ptr = code_frames.release();
+                task.wakeup();
             }
-            task.init_context(nullptr, 0);
-            task.wakeup();
             root.close(handle);
         } else {
             puts("unknown command");

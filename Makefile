@@ -102,6 +102,8 @@ run_debug: run_prep
 	-device qemu-xhci \
 	-device usb-mouse -device usb-kbd \
 	-nic none \
+	-d int \
+	-no-reboot -no-shutdown \
 	-gdb tcp::8080 -S & \
 	lldb out/kernel.elf
 

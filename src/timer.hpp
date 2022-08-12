@@ -5,7 +5,7 @@
 #include "acpi.hpp"
 #include "interrupt/vector.hpp"
 #include "message.hpp"
-#include "task.hpp"
+#include "task/manager.hpp"
 
 namespace timer {
 enum Flags {
@@ -105,7 +105,7 @@ inline auto initialize_timer() -> void {
     stop();
     lapic_timer_freq = static_cast<uint64_t>(elapsed) * 10;
 
-    *internal::divide_config = 0b1011;                                                 // divide 1:1
+    *internal::divide_config = 0b1011;                                        // divide 1:1
     *internal::lvt_timer     = (0b010 << 16) | interrupt::Vector::LAPICTimer; // not-masked, periodic
     *internal::initial_count = lapic_timer_freq / internal::timer_freq;
 }
