@@ -41,7 +41,6 @@ using Critical = SharedValue<Mutex, T>;
 
 class Event {
   private:
-    //task::Task*      task;
     std::atomic_flag flag;
 
   public:
@@ -54,18 +53,15 @@ class Event {
     auto notify() -> void {
         flag.test_and_set();
         task::task_manager->notify_address(this);
-        //task->wakeup();
     }
 
     auto reset() -> void {
         flag.clear();
     }
 
-    Event() /*: task(&task::task_manager->get_current_task())*/ {
+    Event() {
         task::task_manager->add_wait_address(this);
     }
-
-    //Event(task::Task& task) : task(&task) {}
 
     ~Event() {
         task::task_manager->erase_wait_address(this);

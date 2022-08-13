@@ -27,8 +27,9 @@ class TaskManager {
     uint64_t                                                 last_id      = 0;
     int                                                      current_nice = 0;
     bool                                                     nice_changed = false;
-    std::vector<ManagedTask*>                                delete_queue;
     std::unordered_map<uintptr_t, std::vector<ManagedTask*>> wait_address_tasks;
+
+    std::vector<ManagedTask*> delete_queue;
 
     template <class T, class U>
     void erase(T& c, const U& value) {
@@ -75,11 +76,35 @@ class TaskManager {
         return *tasks.emplace_back(new ManagedTask(last_id));
     }
 
-    auto delete_managed_task(ManagedTask* const task) -> void {
-        if(task == running[current_nice].front()) {
-            delete_queue.emplace_back(task);
-            switch_task(true);
-            return;
+    // this functions unlocks lock
+    auto exit_managed_task(ManagedTask* const task) -> void {
+        delete_queue.emplace_back(task);
+        notify_address_locked(this);
+        sleep(task);
+    }
+
+    // this function is thread safe
+    auto wait_managed_task(ManagedTask* const task) -> void {
+        while(true) {
+            aquire_lock();
+            auto found = false;
+            for(auto i = delete_queue.begin(); i < delete_queue.end(); i += 1) {
+                if(*i == task) {
+                    found = true;
+                    i     = delete_queue.erase(i);
+                }
+            }
+            if(found) {
+                for(auto i = tasks.begin(); i < tasks.end(); i += 1) {
+                    if(i->get() == task) {
+                        tasks.erase(i);
+                        break;
+                    }
+                }
+                release_lock();
+                return;
+            }
+            wait_address(this, container_of(self_task.load(), &ManagedTask::task));
         }
     }
 
@@ -126,6 +151,17 @@ class TaskManager {
         }
         p->second.emplace_back(task);
         sleep(task);
+    }
+
+    auto notify_address_locked(const void* const address) -> void {
+        const auto key = reinterpret_cast<uintptr_t>(address);
+        const auto p   = wait_address_tasks.find(key);
+        if(p != wait_address_tasks.end()) {
+            const auto to_notify = std::move(p->second);
+            for(auto task : to_notify) {
+                wakeup(task, -1);
+            }
+        }
     }
 
     auto switch_task_locked(Task* const next_task) -> void {
@@ -194,6 +230,15 @@ class TaskManager {
         auto& task = new_managed_task().task;
         release_lock();
         return task;
+    }
+
+    auto exit_task(Task* const task) -> void {
+        aquire_lock();
+        exit_managed_task(container_of(task, &ManagedTask::task));
+    }
+
+    auto wait_task(Task* const task) -> void {
+        wait_managed_task(container_of(task, &ManagedTask::task));
     }
 
     auto switch_task(const bool sleep_current = false) -> void {
@@ -291,14 +336,7 @@ class TaskManager {
 
     auto notify_address(const void* const address) -> void {
         aquire_lock();
-        const auto key = reinterpret_cast<uintptr_t>(address);
-        const auto p   = wait_address_tasks.find(key);
-        if(p != wait_address_tasks.end()) {
-            const auto to_notify = std::move(p->second);
-            for(auto task : to_notify) {
-                wakeup(task, -1);
-            }
-        }
+        notify_address_locked(address);
         release_lock();
     }
 
@@ -314,10 +352,16 @@ class TaskManager {
         idle.nice    = max_nice;
         idle.running = true;
         running[max_nice].push_back(&idle);
+
+        wait_address_tasks.emplace(reinterpret_cast<uintptr_t>(this), std::vector<ManagedTask*>());
     }
 };
 
 inline auto task_manager = (TaskManager*)(nullptr);
+
+inline auto Task::exit() -> void {
+    task_manager->exit_task(this);
+}
 
 inline auto Task::sleep() -> Task& {
     task_manager->sleep(this);

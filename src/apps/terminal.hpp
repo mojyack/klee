@@ -186,13 +186,15 @@ class Shell {
                 return;
             }
 
+            auto task = (task::Task*)(nullptr);
             {
-                auto& task = task::task_manager->new_task();
-                task.init_context(task::elf_startup, reinterpret_cast<uint64_t>(code_frames.get()));
+                task = &task::task_manager->new_task();
+                task->init_context(task::elf_startup, reinterpret_cast<uint64_t>(code_frames.get()));
                 [[maybe_unused]] const auto raw_ptr = code_frames.release();
-                task.wakeup();
+                task->wakeup();
             }
             root.close(handle);
+            task::task_manager->wait_task(task);
         } else {
             puts("unknown command");
         }

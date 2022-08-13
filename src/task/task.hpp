@@ -92,6 +92,7 @@ class Task {
         return m;
     }
 
+    auto exit() -> void;
     auto sleep() -> Task&;
     auto wakeup(int nice = -1) -> Task&;
     auto wakeup_may_fail() -> void; // used by interrupt

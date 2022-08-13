@@ -1,4 +1,4 @@
-//#include <array>
+#include <array>
 //
 // auto strcmp(const char* const a, const char* const b) -> int {
 //    auto i = 0;
@@ -22,15 +22,14 @@
 // auto stack     = std::array<long, 100>();
 
 using Print = void(const char*, ...);
-auto& print = *reinterpret_cast<Print*>(0x0000000000127710);
 
 extern "C" {
-auto main() -> int {
+auto start(const uint64_t task, const int64_t data) -> int {
+    auto print = reinterpret_cast<Print*>(data);
+
     print("Hello, this is rpn!\n");
-    print("main() at 0x%lX\n", &main);
-    while(1) {
-        __asm__("hlt");
-    }
+    print("start() at 0x%lX\n", &start);
+    print("Bye!\n");
     return 0;
 }
 }
