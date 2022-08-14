@@ -2,15 +2,15 @@
 
 enum class DescriptorType {
     // system segment & gate descriptor types
-    Upper8Bytes   = 0,
-    LDT           = 2,
-    TSSAvailable  = 9,
-    TSSBusy       = 11,
-    CallGate      = 12,
-    InterruptGate = 14,
-    TrapGate      = 15,
+    Upper8Bytes   = 0b0000,
+    LDT           = 0b0010,
+    TSSAvailable  = 0b1001,
+    TSSBusy       = 0b1011,
+    CallGate      = 0b1100,
+    InterruptGate = 0b1110,
+    TrapGate      = 0b1111,
 
     // code & data segment types
-    ReadWrite   = 2,
-    ExecuteRead = 10,
+    ReadWrite   = 0b0010,
+    ExecuteRead = 0b1010,
 };

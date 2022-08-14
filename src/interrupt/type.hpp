@@ -9,6 +9,7 @@ union InterruptDescriptorAttribute {
     struct {
         uint16_t interrupt_stack_table : 3;
         uint16_t : 5;
+
         DescriptorType type : 4;
         uint16_t : 1;
         uint16_t descriptor_privilege_level : 2;
