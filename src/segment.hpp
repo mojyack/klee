@@ -10,19 +10,25 @@ constexpr auto kernel_ds = 0;
 
 union SegmentDescriptor {
     uint64_t data;
+
+    // base and limit are ignored in long mode
     struct {
         uint64_t       limit_low : 16;
         uint64_t       base_low : 16;
+
         uint64_t       base_middle : 8;
+
         DescriptorType type : 4;
         uint64_t       system_segment : 1;
         uint64_t       descriptor_privilege_level : 2;
         uint64_t       present : 1;
+
         uint64_t       limit_high : 4;
         uint64_t       available : 1;
         uint64_t       long_mode : 1;
         uint64_t       default_operation_size : 1;
         uint64_t       granularity : 1;
+
         uint64_t       base_high : 8;
     } __attribute__((packed)) bits;
 
@@ -54,10 +60,12 @@ union SegmentDescriptor {
 } __attribute__((packed));
 
 inline auto setup_segments() -> void {
-    static auto gdt = std::array<SegmentDescriptor, 3>();
+    static auto gdt = std::array<SegmentDescriptor, 5>();
 
     gdt[0].data = 0;
     gdt[1].set_code_segment(DescriptorType::ExecuteRead, 0, 0, 0x0FFFFF);
     gdt[2].set_data_segment(DescriptorType::ReadWrite, 0, 0, 0x0FFFFF);
-    load_gdt(sizeof(gdt) - 1, reinterpret_cast<uintptr_t>(&gdt[0]));
+    gdt[3].set_code_segment(DescriptorType::ExecuteRead, 3, 0, 0x0FFFFF);
+    gdt[4].set_data_segment(DescriptorType::ReadWrite, 3, 0, 0x0FFFFF);
+    load_gdt(sizeof(gdt) - 1, reinterpret_cast<uintptr_t>(gdt.data()));
 }
