@@ -84,6 +84,11 @@ class Kernel {
         const auto mousecursor_layer = window_manager->create_layer();
         const auto fb_size           = framebuffer->get_size();
 
+        // initialize tss
+        if(const auto e = setup_tss()) {
+            logger(LogLevel::Error, "failed to setup tss\n");
+        }
+
         // initialize acpi
         if(!acpi::initialize(rsdp)) {
             return;
@@ -222,11 +227,11 @@ class Kernel {
             task::kernel_task->sleep();
             goto loop;
         }
-        //if(message->type != MessageType::RefreshScreenDone) {
-        //    auto buf = std::array<char, 128>();
-        //    snprintf(buf.data(), buf.size(), "loop %d %p %p %p", message->type, task::kernel_task, &fs, &term);
-        //    debug::debug_print(buf.data());
-        //}
+        // if(message->type != MessageType::RefreshScreenDone) {
+        //     auto buf = std::array<char, 128>();
+        //     snprintf(buf.data(), buf.size(), "loop %d %p %p %p", message->type, task::kernel_task, &fs, &term);
+        //     debug::debug_print(buf.data());
+        // }
 
         switch(message->type) {
         case MessageType::XHCIInterrupt:
@@ -319,3 +324,17 @@ extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferCo
         __asm__("hlt");
     }
 }
+
+// functions below is referenced by asmcode
+// therefore, it can't be defined as an inline function
+
+namespace interrupt::internal {
+extern "C" auto int_handler_lapic_timer(task::TaskContext& context) -> void {
+    const auto task_switch = timer_manager->count_tick();
+    notify_end_of_interrupt();
+
+    if(task_switch) {
+        task::task_manager->switch_task_may_fail(context);
+    }
+}
+} // namespace interrupt::internal

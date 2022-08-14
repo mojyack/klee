@@ -12,4 +12,8 @@ void     set_dsall(uint16_t value);
 uint64_t get_cr3();
 void     set_cr3(uint64_t value);
 void     switch_context(void* next, void* current);
+void     restore_context(void* context);
+void     jump_to_app(uint64_t id, int64_t data, uint16_t cs, uint16_t ss, uint64_t rip, uint64_t rsp);
+void     load_tr(uint16_t sel);
+void     int_handler_lapic_timer_entry();
 }

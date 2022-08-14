@@ -108,7 +108,7 @@ class TaskManager {
         }
     }
 
-    // this functions unlocks lock
+    // this function unlocks lock
     auto sleep(ManagedTask* const task) -> void {
         if(!task->running) {
             release_lock();
@@ -116,7 +116,7 @@ class TaskManager {
         }
         task->running = false;
 
-        if(task != running[current_nice].front()) {
+        if(&task->task != self_task.load()) {
             erase(running[task->nice], task);
             release_lock();
             return;
@@ -164,16 +164,7 @@ class TaskManager {
         }
     }
 
-    auto switch_task_locked(Task* const next_task) -> void {
-        next_task->apply_page_map();
-        auto current_task = self_task.load();
-        __asm__("cli");
-        self_task.store(next_task);
-        switch_context(&next_task->get_context(), &current_task->get_context());
-    }
-
-    // this function unlocks lock
-    auto switch_task_locked(const bool sleep_current = false) -> void {
+    auto rotate_run_queue(const bool sleep_current) -> ManagedTask& {
         auto&      nice_queue   = running[current_nice];
         const auto current_task = nice_queue.front();
         nice_queue.pop_front();
@@ -197,12 +188,49 @@ class TaskManager {
             }
         }
 
+        return *current_task;
+    }
+
+    auto switch_task_locked(Task* const next_task) -> void {
+        next_task->apply_page_map();
+        auto current_task = self_task.load();
+        __asm__("cli");
+        self_task.store(next_task);
+        switch_context(&next_task->get_context(), &current_task->get_context());
+    }
+
+    // this function unlocks lock
+    auto switch_task_locked(const bool sleep_current = false) -> void {
+        auto current_task = &rotate_run_queue(sleep_current);
         const auto next_task = running[current_nice].front();
+
+        if(current_task == next_task) {
+            return;
+        }
+
         next_task->task.apply_page_map();
         __asm__("cli");
         release_lock();
         self_task.store(&next_task->task);
         switch_context(&next_task->task.get_context(), &current_task->task.get_context());
+    }
+
+    // this function unlocks lock
+    auto switch_task_locked(TaskContext& context) -> void {
+        const auto current_task = &rotate_run_queue(false);
+        const auto next_task = running[current_nice].front();
+        memcpy(&current_task->task.get_context(), &context, sizeof(TaskContext));
+
+        if(current_task == next_task) {
+            release_lock();
+            return;
+        }
+
+        next_task->task.apply_page_map();
+        __asm__("cli");
+        release_lock();
+        self_task.store(&next_task->task);
+        restore_context(&next_task->task.get_context());
     }
 
     auto try_aquire_lock() -> bool {
@@ -247,11 +275,11 @@ class TaskManager {
     }
 
     // called by timer interrupt
-    auto switch_task_may_fail() -> void {
+    auto switch_task_may_fail(TaskContext& context) -> void {
         if(!try_aquire_lock()) {
             return;
         }
-        switch_task_locked(false);
+        switch_task_locked(context);
     }
 
     auto sleep(Task* const task) -> void {

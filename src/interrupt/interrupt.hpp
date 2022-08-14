@@ -47,15 +47,6 @@ __attribute__((interrupt)) static auto int_handler_xhci(InterruptFrame* const fr
     notify_end_of_interrupt();
 }
 
-__attribute__((interrupt)) static auto int_handler_lapic_timer(InterruptFrame* const frame) -> void {
-    const auto task_switch = timer_manager->count_tick();
-    notify_end_of_interrupt();
-
-    if(task_switch) {
-        task::task_manager->switch_task_may_fail();
-    }
-}
-
 __attribute__((interrupt)) static auto int_handler_ahci(InterruptFrame* const frame) -> void {
     task::kernel_task->send_message_may_fail(MessageType::AHCIInterrupt);
     notify_end_of_interrupt();
@@ -105,7 +96,7 @@ inline auto initialize(timer::TimerManager& timer_manager) -> void {
 
     sie(Vector::XHCI, internal::int_handler_xhci);
     sie(Vector::AHCI, internal::int_handler_ahci);
-    sie(Vector::LAPICTimer, internal::int_handler_lapic_timer);
+    sie(Vector::LAPICTimer, int_handler_lapic_timer_entry);
     sie(Vector::VirtIOGPUControl, internal::int_handler_virtio_gpu_control);
     sie(Vector::VirtIOGPUCursor, internal::int_handler_virtio_gpu_cursor);
     load_idt(sizeof(internal::idt) - 1, reinterpret_cast<uintptr_t>(&internal::idt[0]));

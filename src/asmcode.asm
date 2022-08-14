@@ -115,7 +115,10 @@ switch_context:
     mov [rsi + 0x38], rdx
 
     fxsave [rsi + 0xc0]
+    ; fall through to restore_context
 
+global restore_context
+restore_context:
     ; stackframe for iret
     push qword [rdi + 0x28] ; SS
     push qword [rdi + 0x70] ; RSP
@@ -150,8 +153,87 @@ switch_context:
 
     mov rdi, [rdi + 0x60]
 
-    cli
+    sti
     o64 iret
+
+global jump_to_app
+jump_to_app:  ; void jump_to_app(uint64_t id(rdi), int64_t data(rsi), uint16_t cs(rdx), uint16_t ss(rcx), uint64_t rip(r8), uint64_t rsp(r9));
+    push rbp
+    mov rbp, rsp
+    push rcx  ; SS
+    push r9   ; RSP
+    push rdx  ; CS
+    push r8   ; RIP
+    o64 retf
+
+global load_tr
+load_tr:
+    ltr di
+    ret
+
+extern int_handler_lapic_timer
+global int_handler_lapic_timer_entry
+int_handler_lapic_timer_entry:
+    push rbp
+    mov rbp, rsp
+
+    ; construct TaskContext on the stack
+    sub rsp, 512
+    fxsave [rsp]
+    push r15
+    push r14
+    push r13
+    push r12
+    push r11
+    push r10
+    push r9
+    push r8
+    push qword [rbp]         ; RBP
+    push qword [rbp + 0x20]  ; RSP
+    push rsi
+    push rdi
+    push rdx
+    push rcx
+    push rbx
+    push rax
+
+    mov ax, fs
+    mov bx, gs
+    mov rcx, cr3
+
+    push rbx                 ; GS
+    push rax                 ; FS
+    push qword [rbp + 0x28]  ; SS
+    push qword [rbp + 0x10]  ; CS
+    push rbp                 ; reserved1
+    push qword [rbp + 0x18]  ; RFLAGS
+    push qword [rbp + 0x08]  ; RIP
+    push rcx                 ; CR3
+
+    mov rdi, rsp
+    call int_handler_lapic_timer
+
+    add rsp, 8*8  ; ignore CR3 to GS
+    pop rax
+    pop rbx
+    pop rcx
+    pop rdx
+    pop rdi
+    pop rsi
+    add rsp, 16   ; ignore RSP and RBP
+    pop r8
+    pop r9
+    pop r10
+    pop r11
+    pop r12
+    pop r13
+    pop r14
+    pop r15
+    fxrstor [rsp]
+
+    mov rsp, rbp
+    pop rbp
+    iretq
 
 extern kernel_main_stack
 extern kernel_main

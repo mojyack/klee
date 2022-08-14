@@ -109,13 +109,13 @@ class Task {
     }
 
     auto apply_page_map() -> void {
+        auto& pml4e             = paging::pml4_table[0b100000000];
         if(page_map) {
-            auto& pml4e             = paging::pml4_table[0b100000000];
             pml4e.data              = reinterpret_cast<uint64_t>(page_map->upper_page_map.data.data());
             pml4e.directory.present = 1;
             pml4e.directory.write   = 1;
+            pml4e.directory.user    = 1;
         } else {
-            auto& pml4e = paging::pml4_table[0b100000000];
             pml4e.data  = 0;
         }
     }

@@ -91,7 +91,9 @@ inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdp
 
         const auto physical_addr = reinterpret_cast<uint64_t>(f->get_frame());
         const auto virtual_addr  = segment_first + paging::bytes_per_page * i;
-        paging::map_virtual_to_physical(&pdpt, virtual_addr, physical_addr);
+        // TODO
+        // remove Attribute::Write for code section
+        paging::map_virtual_to_physical(&pdpt, virtual_addr, physical_addr, paging::Attribute::UserExecute | paging::Attribute::Write);
     }
 
     task.apply_page_map();
