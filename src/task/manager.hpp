@@ -4,7 +4,6 @@
 #include "../asmcode.h"
 #include "../error.hpp"
 #include "../mutex-like.hpp"
-#include "../print.hpp"
 #include "../util/container-of.hpp"
 
 namespace task {

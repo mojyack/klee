@@ -3,7 +3,6 @@
 #include <limits>
 
 #include "error.hpp"
-#include "print.hpp"
 #include "libc-support.hpp"
 #include "memory-map.h"
 
@@ -217,7 +216,6 @@ class SmartFrameID {
     ~SmartFrameID() {
         if(id != nullframe) {
             allocator->deallocate(id, frames);
-            printk("free %lu\n", id);
         }
     }
 };

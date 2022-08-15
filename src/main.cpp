@@ -21,6 +21,7 @@
 #include "pci.hpp"
 #include "print.hpp"
 #include "segment.hpp"
+#include "syscall.hpp"
 #include "timer.hpp"
 #include "uefi/gop-framebuffer.hpp"
 #include "usb/classdriver/hid.hpp"
@@ -66,9 +67,7 @@ class Kernel {
   public:
     auto run() -> void {
         // setup memory manager
-        setup_segments();
-        set_dsall(kernel_ds);
-        set_csss(kernel_cs, kernel_ss);
+        segment::setup_segments();
         paging::setup_identity_page_table();
         memory_manager.initialize_heap();
 
@@ -85,9 +84,12 @@ class Kernel {
         const auto fb_size           = framebuffer->get_size();
 
         // initialize tss
-        if(const auto e = setup_tss()) {
+        if(const auto e = segment::setup_tss()) {
             logger(LogLevel::Error, "failed to setup tss\n");
         }
+
+        // initialize syscall
+        syscall::initialize_syscall();
 
         // initialize acpi
         if(!acpi::initialize(rsdp)) {
@@ -328,6 +330,7 @@ extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferCo
 // functions below is referenced by asmcode
 // therefore, it can't be defined as an inline function
 
+// interrupt/interrupt.hpp
 namespace interrupt::internal {
 extern "C" auto int_handler_lapic_timer(task::TaskContext& context) -> void {
     const auto task_switch = timer_manager->count_tick();
@@ -338,3 +341,8 @@ extern "C" auto int_handler_lapic_timer(task::TaskContext& context) -> void {
     }
 }
 } // namespace interrupt::internal
+
+// syscall.hpp
+namespace syscall {
+extern "C" auto syscall_table = std::array<SyscallFunc*, 1> {syscall_printk};
+}

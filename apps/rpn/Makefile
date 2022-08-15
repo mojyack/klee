@@ -10,5 +10,8 @@ all: $(OUT)/rpn
 $(BUILD)/rpn.o: main.cpp Makefile
 	clang++ $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-$(OUT)/rpn: $(BUILD)/rpn.o
-	ld.lld $(LDFLAGS) -o $@ $<
+$(BUILD)/syscall.o: syscall.asm Makefile
+	nasm -f elf64 -o $@ $<
+
+$(OUT)/rpn: $(BUILD)/rpn.o $(BUILD)/syscall.o
+	ld.lld $(LDFLAGS) -o $@ $^

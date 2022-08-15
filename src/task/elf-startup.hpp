@@ -37,7 +37,7 @@ inline auto elf_startup(const uint64_t id, const int64_t data) -> void {
     printk("entry at %lX\n", elf_info.entry);
 
     // [[ noreturn ]]
-    jump_to_app(id, 0, SegmentSelector{.bits = {3, 0, 3}}.data, SegmentSelector{.bits = {3, 0, 4}}.data, reinterpret_cast<uint64_t>(elf_info.entry), stack_frame_addr + (0x1000 - 8));
+    jump_to_app(id, 0, segment::SegmentSelector{.bits = {3, 0, segment::SegmentNumber::UserCode}}.data, segment::SegmentSelector{.bits = {3, 0, segment::SegmentNumber::UserStack}}.data, reinterpret_cast<uint64_t>(elf_info.entry), stack_frame_addr + (0x1000 - 8));
 
     //(reinterpret_cast<TaskEntry*>(elf_info.entry))(id, reinterpret_cast<int64_t>(static_cast<int (*)(const char*, ...)>(printk)));
     task.exit();

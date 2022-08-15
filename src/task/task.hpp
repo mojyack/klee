@@ -62,8 +62,8 @@ class Task {
 
         context.cr3    = get_cr3();
         context.rflags = 0x202;
-        context.cs     = kernel_cs;
-        context.ss     = kernel_ss;
+        context.cs     = segment::kernel_cs.data;
+        context.ss     = segment::kernel_ss.data;
         context.rsp    = (stack_end & ~0x0Flu) - 8;
 
         // mask all exceptions of MXCSR
@@ -109,14 +109,14 @@ class Task {
     }
 
     auto apply_page_map() -> void {
-        auto& pml4e             = paging::pml4_table[0b100000000];
+        auto& pml4e = paging::pml4_table[0b100000000];
         if(page_map) {
             pml4e.data              = reinterpret_cast<uint64_t>(page_map->upper_page_map.data.data());
             pml4e.directory.present = 1;
             pml4e.directory.write   = 1;
             pml4e.directory.user    = 1;
         } else {
-            pml4e.data  = 0;
+            pml4e.data = 0;
         }
     }
 

@@ -6,10 +6,7 @@
 #include "memory-manager.hpp"
 #include "x86-descriptor.hpp"
 
-constexpr auto kernel_cs = 1 << 3;
-constexpr auto kernel_ss = 2 << 3;
-constexpr auto kernel_ds = 0;
-
+namespace segment {
 union SegmentDescriptor {
     uint64_t data;
 
@@ -96,13 +93,30 @@ struct TaskStateSegment {
 
 static auto gdt = std::array<SegmentDescriptor, 7>();
 
+enum SegmentNumber : uint16_t {
+    Null        = 0,
+    KernelCode  = 1,
+    KernelStack = 2,
+    UserCode    = 4,
+    UserStack   = 3,
+    TSSLow      = 5,
+    TSSHigh     = 6,
+};
+
+constexpr auto kernel_cs = segment::SegmentSelector{.bits = {.index = segment::SegmentNumber::KernelCode}};
+constexpr auto kernel_ss = segment::SegmentSelector{.bits = {.index = segment::SegmentNumber::KernelStack}};
+constexpr auto kernel_ds = segment::SegmentSelector{.bits = {.index = segment::SegmentNumber::Null}};
+
 inline auto setup_segments() -> void {
-    gdt[0].data = 0;
-    gdt[1].set_code_segment(DescriptorType::ExecuteRead, 0, 0, 0x0FFFFF);
-    gdt[2].set_data_segment(DescriptorType::ReadWrite, 0, 0, 0x0FFFFF);
-    gdt[3].set_code_segment(DescriptorType::ExecuteRead, 3, 0, 0x0FFFFF);
-    gdt[4].set_data_segment(DescriptorType::ReadWrite, 3, 0, 0x0FFFFF);
+    gdt[SegmentNumber::Null].data = 0;
+    gdt[SegmentNumber::KernelCode].set_code_segment(DescriptorType::ExecuteRead, 0, 0, 0x0FFFFF);
+    gdt[SegmentNumber::KernelStack].set_data_segment(DescriptorType::ReadWrite, 0, 0, 0x0FFFFF);
+    gdt[SegmentNumber::UserCode].set_code_segment(DescriptorType::ExecuteRead, 3, 0, 0x0FFFFF);
+    gdt[SegmentNumber::UserStack].set_data_segment(DescriptorType::ReadWrite, 3, 0, 0x0FFFFF);
     load_gdt(sizeof(gdt) - 1, reinterpret_cast<uintptr_t>(gdt.data()));
+
+    set_dsall(kernel_ds.data);
+    set_csss(kernel_cs.data, kernel_ss.data);
 }
 
 inline auto setup_tss() -> Error {
@@ -114,8 +128,10 @@ inline auto setup_tss() -> Error {
     tss.rsp0  = reinterpret_cast<uint64_t>(static_cast<uint8_t*>(tss_stack->get_frame()) + bytes_per_frame);
 
     const auto tss_addr = reinterpret_cast<uint64_t>(&tss);
-    gdt[5].set_system_segment(DescriptorType::TSSAvailable, 0, tss_addr & 0xFFFFFFFFu, sizeof(tss) - 1);
-    gdt[6].data = tss_addr >> 32;
+    gdt[TSSLow].set_system_segment(DescriptorType::TSSAvailable, 0, tss_addr & 0xFFFFFFFFu, sizeof(tss) - 1);
+    gdt[TSSHigh].data = tss_addr >> 32;
     load_tr(SegmentSelector{.bits = {0, 0, 5}}.data);
     return Error();
 }
+} // namespace segment
+

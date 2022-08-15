@@ -76,6 +76,15 @@ set_cr3:
     mov cr3, rdi
     ret
 
+global write_msr
+write_msr:
+    mov rdx, rsi
+    shr rdx, 32
+    mov eax, esi
+    mov ecx, edi
+    wrmsr
+    ret
+
 global switch_context
 switch_context:
     mov [rsi + 0x40], rax
@@ -165,6 +174,29 @@ jump_to_app:  ; void jump_to_app(uint64_t id(rdi), int64_t data(rsi), uint16_t c
     push rdx  ; CS
     push r8   ; RIP
     o64 retf
+
+extern syscall_table
+global syscall_entry
+syscall_entry:
+    push rbp
+    push rcx  ; original RIP
+    push r11  ; original RFLAGS
+
+    mov rcx, r10
+    mov rbp, rsp
+    and rsp, 0xFFFFFFFFFFFFFFF0
+
+    call [syscall_table + 8 * eax]
+
+    ; rbx, r12-r15 is callee-saved and do not need to be saved
+    ; rax is return value and and is not saved
+
+    mov rsp, rbp
+
+    pop r11
+    pop rcx
+    pop rbp
+    o64 sysret
 
 global load_tr
 load_tr:

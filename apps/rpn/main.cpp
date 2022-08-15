@@ -21,15 +21,15 @@
 // auto stack_ptr = int();
 // auto stack     = std::array<long, 100>();
 
-using Print = void(const char*, ...);
-
 extern "C" {
-auto start(const uint64_t task, const int64_t data) -> int {
-    auto print = reinterpret_cast<Print*>(data);
+auto syscall_printk(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) ->int64_t;
 
-    print("Hello, this is rpn!\n");
-    print("start() at 0x%lX\n", &start);
-    print("Bye!\n");
-    return 0;
+volatile int a = 0;
+auto start(const uint64_t task, const int64_t data) -> void {
+    syscall_printk(reinterpret_cast<uint64_t>("Hello via syscall!\n"), 0, 0, 0, 0, 0);
+    while(true) {
+        a = 0;
+    }
+    return;
 }
 }
