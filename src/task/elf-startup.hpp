@@ -32,12 +32,9 @@ inline auto elf_startup(const uint64_t id, const int64_t data) -> void {
     }
     paging::map_virtual_to_physical(&page_map->upper_page_map, stack_frame_addr, reinterpret_cast<uintptr_t>(stack_frame.as_value().get_frame()), paging::Attribute::UserWrite);
     page_map->allocated_frames.emplace_back(stack_frame.as_value(), 1);
-    printk("map %lX to %lX\n", stack_frame_addr, reinterpret_cast<uintptr_t>(stack_frame.as_value().get_frame()));
-    printk("stack begin at %lX\n", stack_frame_addr + (0x1000 - 8));
-    printk("entry at %lX\n", elf_info.entry);
 
-    const auto code = call_app(id, 0, segment::SegmentSelector{.bits = {3, 0, segment::SegmentNumber::UserStack}}.data, reinterpret_cast<uint64_t>(elf_info.entry), stack_frame_addr + (0x1000 - 8), &task.get_system_stack_pointer());
-    printk("app %u exited with return value %d\n", code);
+    // [[ noreturn ]]
+    const auto code = jump_to_app(id, 0, segment::SegmentSelector{.bits = {3, 0, segment::SegmentNumber::UserStack}}.data, reinterpret_cast<uint64_t>(elf_info.entry), stack_frame_addr + (0x1000 - 8), &task.get_system_stack_pointer());
     task.exit();
 }
 } // namespace task

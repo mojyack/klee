@@ -351,6 +351,4 @@ extern "C" auto syscall_table = std::array<SyscallFunc*, 2>{
 }
 
 // task/manager.hpp
-__attribute__((no_caller_saved_registers)) extern "C" auto get_system_stack_of_self_task() -> uint64_t {
-    return task::task_manager->get_current_task().get_system_stack_pointer();
-}
+extern "C" auto self_task_system_stack = uint64_t();

@@ -6,6 +6,8 @@
 #include "../mutex-like.hpp"
 #include "../util/container-of.hpp"
 
+extern "C" uint64_t self_task_system_stack;
+
 namespace task {
 class TaskManager {
   private:
@@ -43,6 +45,11 @@ class TaskManager {
     }
 
     // private functions are all thread unsafe!
+
+    auto update_self_task(Task& task) -> void {
+        self_task.store(&task);
+        self_task_system_stack = task.get_system_stack_pointer();
+    }
 
     auto change_nice_running(ManagedTask* const task, const int nice) -> void {
         if(nice < 0 || nice == task->nice) {
@@ -194,7 +201,7 @@ class TaskManager {
         next_task->apply_page_map();
         auto current_task = self_task.load();
         __asm__("cli");
-        self_task.store(next_task);
+        update_self_task(*next_task);
         switch_context(&next_task->get_context(), &current_task->get_context());
     }
 
@@ -210,7 +217,7 @@ class TaskManager {
         next_task->task.apply_page_map();
         __asm__("cli");
         release_lock();
-        self_task.store(&next_task->task);
+        update_self_task(next_task->task);
         switch_context(&next_task->task.get_context(), &current_task->task.get_context());
     }
 
@@ -228,7 +235,7 @@ class TaskManager {
         next_task->task.apply_page_map();
         __asm__("cli");
         release_lock();
-        self_task.store(&next_task->task);
+        update_self_task(next_task->task);
         restore_context(&next_task->task.get_context());
     }
 

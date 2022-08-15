@@ -165,15 +165,14 @@ restore_context:
     sti
     o64 iret
 
-global call_app
-call_app:  ; void call_app(uint64_t id, int64_t data, uint16_t ss(rdx), uint64_t rip(rsi), uint64_t rsp(rdx), uint64_t* system_stack_ptr(r9));
-    push rbx
-    push rbp
-    push r12
-    push r13
-    push r14
-    push r15
+extern self_task_system_stack
+global jump_to_app
+jump_to_app:  ; void jump_to_app(uint64_t id, int64_t data, uint16_t ss(rdx), uint64_t rip(rcx), uint64_t rsp(r8), uint64_t* system_stack_ptr(r9));
     mov [r9], rsp ; save system stack pointer
+
+    ; self_task_system_stack is automatically updated by the task_manager on context switch,
+    ; but set here so that the system call can be called before it is ever context switched
+    mov [self_task_system_stack], rsp
 
     push rdx  ; SS
     push r8   ; RSP
@@ -183,63 +182,27 @@ call_app:  ; void call_app(uint64_t id, int64_t data, uint16_t ss(rdx), uint64_t
     o64 retf
 
 extern syscall_table
-extern get_system_stack_of_self_task
 global syscall_entry
 syscall_entry:
     push rbp
     push rcx  ; original RIP
     push r11  ; original RFLAGS
-    push rax  ; syscall number
 
-    mov rcx, r10
-    and eax, 0x7fffffff
-    mov rbp, rsp
+    mov rcx, r10 ; restore 4th argument (rcx is used by SYSCALL)
+    mov rbp, rsp ; rebase stack
 
-    ; setups for run syscall on system stack
-    and rsp, 0xFFFFFFFFFFFFFFF0
-    push rax
-    push rdx
-    cli
-    call get_system_stack_of_self_task
-    sti
-    mov rdx, [rsp + 0]  ; RDX
-    mov [rax - 16], rdx
-    mov rdx, [rsp + 8]  ; RAX
-    mov [rax - 8], rdx
-
-    lea rsp, [rax - 16]
-    pop rdx
-    pop rax
-    and rsp, 0xFFFFFFFFFFFFFFF0
+    mov rsp, [self_task_system_stack] ; use kernel stack
+    and rsp, 0xFFFFFFFFFFFFFFF0 ; rsp must be 16 byte aligned
 
     call [syscall_table + 8 * eax]
 
-    ; rbx, r12-r15 is callee-saved and do not need to be saved
-    ; rax is return value and and is not saved
-
-    mov rsp, rbp
-
-    pop rsi  ; restore syscall number
-    cmp esi, 1
-    je  .exit
+    mov rsp, rbp 
 
     pop r11
     pop rcx
     pop rbp
+
     o64 sysret
-
-.exit:
-    mov rsp, rax
-    mov eax, edx
-
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rbp
-    pop rbx
-
-    ret  ; exit 
 
 global load_tr
 load_tr:

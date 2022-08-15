@@ -19,10 +19,9 @@ inline auto syscall_printk(const uint64_t arg0, const uint64_t arg1, const uint6
 }
 
 inline auto syscall_exit(const uint64_t arg0, const uint64_t arg1, const uint64_t arg2, const uint64_t arg3, const uint64_t arg4, const uint64_t arg5) -> Result {
-    __asm__("cli");
     auto& task = task::task_manager->get_current_task();
-    __asm__("sti");
-    return {task.get_system_stack_pointer(), static_cast<int>(arg0)};
+    task.exit();
+    return {0, 0};
 }
 
 inline auto initialize_syscall() -> void {
