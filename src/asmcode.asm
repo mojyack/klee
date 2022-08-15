@@ -165,25 +165,51 @@ restore_context:
     sti
     o64 iret
 
-global jump_to_app
-jump_to_app:  ; void jump_to_app(uint64_t id(rdi), int64_t data(rsi), uint16_t cs(rdx), uint16_t ss(rcx), uint64_t rip(r8), uint64_t rsp(r9));
+global call_app
+call_app:  ; void call_app(uint64_t id, int64_t data, uint16_t ss(rdx), uint64_t rip(rsi), uint64_t rsp(rdx), uint64_t* system_stack_ptr(r9));
+    push rbx
     push rbp
-    mov rbp, rsp
-    push rcx  ; SS
-    push r9   ; RSP
+    push r12
+    push r13
+    push r14
+    push r15
+    mov [r9], rsp ; save system stack pointer
+
+    push rdx  ; SS
+    push r8   ; RSP
+    add rdx, 8
     push rdx  ; CS
-    push r8   ; RIP
+    push rcx  ; RIP
     o64 retf
 
 extern syscall_table
+extern get_system_stack_of_self_task
 global syscall_entry
 syscall_entry:
     push rbp
     push rcx  ; original RIP
     push r11  ; original RFLAGS
+    push rax  ; syscall number
 
     mov rcx, r10
+    and eax, 0x7fffffff
     mov rbp, rsp
+
+    ; setups for run syscall on system stack
+    and rsp, 0xFFFFFFFFFFFFFFF0
+    push rax
+    push rdx
+    cli
+    call get_system_stack_of_self_task
+    sti
+    mov rdx, [rsp + 0]  ; RDX
+    mov [rax - 16], rdx
+    mov rdx, [rsp + 8]  ; RAX
+    mov [rax - 8], rdx
+
+    lea rsp, [rax - 16]
+    pop rdx
+    pop rax
     and rsp, 0xFFFFFFFFFFFFFFF0
 
     call [syscall_table + 8 * eax]
@@ -193,10 +219,27 @@ syscall_entry:
 
     mov rsp, rbp
 
+    pop rsi  ; restore syscall number
+    cmp esi, 1
+    je  .exit
+
     pop r11
     pop rcx
     pop rbp
     o64 sysret
+
+.exit:
+    mov rsp, rax
+    mov eax, edx
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+
+    ret  ; exit 
 
 global load_tr
 load_tr:

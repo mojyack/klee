@@ -344,5 +344,13 @@ extern "C" auto int_handler_lapic_timer(task::TaskContext& context) -> void {
 
 // syscall.hpp
 namespace syscall {
-extern "C" auto syscall_table = std::array<SyscallFunc*, 1> {syscall_printk};
+extern "C" auto syscall_table = std::array<SyscallFunc*, 2>{
+    syscall_printk,
+    syscall_exit,
+};
+}
+
+// task/manager.hpp
+__attribute__((no_caller_saved_registers)) extern "C" auto get_system_stack_of_self_task() -> uint64_t {
+    return task::task_manager->get_current_task().get_system_stack_pointer();
 }

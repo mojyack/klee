@@ -23,13 +23,11 @@
 
 extern "C" {
 auto syscall_printk(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) ->int64_t;
+auto syscall_exit(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) ->int64_t;
 
-volatile int a = 0;
 auto start(const uint64_t task, const int64_t data) -> void {
     syscall_printk(reinterpret_cast<uint64_t>("Hello via syscall!\n"), 0, 0, 0, 0, 0);
-    while(true) {
-        a = 0;
-    }
+    syscall_exit(1, 0, 0, 0, 0, 0);
     return;
 }
 }
