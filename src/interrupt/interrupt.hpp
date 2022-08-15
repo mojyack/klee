@@ -4,7 +4,6 @@
 #include <deque>
 
 #include "../asmcode.h"
-#include "../debug.hpp"
 #include "../message.hpp"
 #include "../timer.hpp"
 #include "../x86-descriptor.hpp"
@@ -69,8 +68,11 @@ inline auto initialize(timer::TimerManager& timer_manager) -> void {
 
     const auto cs = read_cs();
 
+#define sie_ist(num, addr, ist) \
+    internal::set_idt_entry(static_cast<interrupt::Vector>(num), internal::make_idt_attr(DescriptorType::InterruptGate, 0, true, ist), reinterpret_cast<uint64_t>(addr), cs);
+
 #define sie(num, addr) \
-    internal::set_idt_entry(static_cast<interrupt::Vector>(num), internal::make_idt_attr(DescriptorType::InterruptGate, 0), reinterpret_cast<uint64_t>(addr), cs);
+    sie_ist(num, addr, 0)
 
     sie(0, int_handler_divide_error);
     sie(1, int_handler_debug);
@@ -96,11 +98,12 @@ inline auto initialize(timer::TimerManager& timer_manager) -> void {
 
     sie(Vector::XHCI, internal::int_handler_xhci);
     sie(Vector::AHCI, internal::int_handler_ahci);
-    sie(Vector::LAPICTimer, int_handler_lapic_timer_entry);
+    sie_ist(Vector::LAPICTimer, int_handler_lapic_timer_entry, ist_for_lapic_timer);
     sie(Vector::VirtIOGPUControl, internal::int_handler_virtio_gpu_control);
     sie(Vector::VirtIOGPUCursor, internal::int_handler_virtio_gpu_cursor);
     load_idt(sizeof(internal::idt) - 1, reinterpret_cast<uintptr_t>(&internal::idt[0]));
 
 #undef sie
+#undef sie_ist
 }
 } // namespace interrupt

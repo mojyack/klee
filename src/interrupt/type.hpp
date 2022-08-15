@@ -33,4 +33,6 @@ struct InterruptFrame {
     uint64_t rsp;
     uint64_t ss;
 };
+
+constexpr auto ist_for_lapic_timer = 1;
 } // namespace interrupt

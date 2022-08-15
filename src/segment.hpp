@@ -2,6 +2,7 @@
 #include <array>
 
 #include "asmcode.h"
+#include "interrupt/type.hpp"
 #include "macro.hpp"
 #include "memory-manager.hpp"
 #include "x86-descriptor.hpp"
@@ -79,13 +80,7 @@ struct TaskStateSegment {
     uint64_t rsp1;
     uint64_t rsp2;
     uint64_t reserved2;
-    uint64_t ist1;
-    uint64_t ist2;
-    uint64_t ist3;
-    uint64_t ist4;
-    uint64_t ist5;
-    uint64_t ist6;
-    uint64_t ist7;
+    uint64_t ist[7];
     uint64_t reserved3;
     uint16_t reserved4;
     uint16_t iopb;
@@ -120,12 +115,17 @@ inline auto setup_segments() -> void {
 }
 
 inline auto setup_tss() -> Error {
-    static auto tss_stack = SmartFrameID();
+    static auto rsp_stack = SmartFrameID();
+    static auto rst_stack = SmartFrameID();
     static auto tss       = TaskStateSegment();
 
-    value_or(stack, allocator->allocate(1));
-    tss_stack = SmartFrameID(stack, 1);
-    tss.rsp0  = reinterpret_cast<uint64_t>(static_cast<uint8_t*>(tss_stack->get_frame()) + bytes_per_frame);
+    value_or(rsp_stack_raw, allocator->allocate(1));
+    rsp_stack = SmartFrameID(rsp_stack_raw, 1);
+    tss.rsp0  = reinterpret_cast<uint64_t>(static_cast<uint8_t*>(rsp_stack->get_frame()) + bytes_per_frame);
+
+    value_or(rst_stack_raw, allocator->allocate(1));
+    rst_stack                                   = SmartFrameID(rst_stack_raw, 1);
+    tss.ist[interrupt::ist_for_lapic_timer - 1] = reinterpret_cast<uint64_t>(static_cast<uint8_t*>(rst_stack->get_frame()) + bytes_per_frame);
 
     const auto tss_addr = reinterpret_cast<uint64_t>(&tss);
     gdt[TSSLow].set_system_segment(DescriptorType::TSSAvailable, 0, tss_addr & 0xFFFFFFFFu, sizeof(tss) - 1);
