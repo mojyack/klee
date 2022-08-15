@@ -130,7 +130,7 @@ inline auto setup_tss() -> Error {
     const auto tss_addr = reinterpret_cast<uint64_t>(&tss);
     gdt[TSSLow].set_system_segment(DescriptorType::TSSAvailable, 0, tss_addr & 0xFFFFFFFFu, sizeof(tss) - 1);
     gdt[TSSHigh].data = tss_addr >> 32;
-    load_tr(SegmentSelector{.bits = {0, 0, 5}}.data);
+    load_tr(SegmentSelector{.bits = {0, 0, TSSLow}}.data);
     return Error();
 }
 } // namespace segment

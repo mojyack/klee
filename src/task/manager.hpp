@@ -1,6 +1,7 @@
 #pragma once
 #include "task.hpp"
 
+#include "../debug.hpp"
 #include "../asmcode.h"
 #include "../error.hpp"
 #include "../mutex-like.hpp"
@@ -202,6 +203,7 @@ class TaskManager {
         auto current_task = self_task.load();
         __asm__("cli");
         update_self_task(*next_task);
+        next_task->get_context().rflags |= 0b1000000000; // interrupt enable
         switch_context(&next_task->get_context(), &current_task->get_context());
     }
 
@@ -218,6 +220,7 @@ class TaskManager {
         __asm__("cli");
         release_lock();
         update_self_task(next_task->task);
+        next_task->task.get_context().rflags |= 0b1000000000; // interrupt enable
         switch_context(&next_task->task.get_context(), &current_task->task.get_context());
     }
 
@@ -236,6 +239,7 @@ class TaskManager {
         __asm__("cli");
         release_lock();
         update_self_task(next_task->task);
+        next_task->task.get_context().rflags |= 0b1000000000; // interrupt enable
         restore_context(&next_task->task.get_context());
     }
 

@@ -32,7 +32,7 @@ class Task {
     std::vector<uint64_t> stack;
     std::deque<Message>   messages;
     TaskEntry*            entry = nullptr;
-    uint64_t              system_stack_pointer;
+    uint64_t              system_stack_pointer = 0;
     alignas(16) TaskContext context;
 
     // 0000RESERVED0000 00PML4000 00PDPT000 000PD0000 000PT0000 000OFFSET000

@@ -16,6 +16,7 @@ void     switch_context(void* next, void* current);
 void     restore_context(void* context);
 int      jump_to_app(uint64_t id, int64_t data, uint16_t ss, uint64_t rip, uint64_t rsp, uint64_t* system_stack_ptr);
 void     syscall_entry();
+void     back_to_system_stack();
 void     load_tr(uint16_t sel);
 void     int_handler_lapic_timer_entry();
 }

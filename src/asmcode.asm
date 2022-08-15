@@ -162,7 +162,6 @@ restore_context:
 
     mov rdi, [rdi + 0x60]
 
-    sti
     o64 iret
 
 extern self_task_system_stack
@@ -203,6 +202,17 @@ syscall_entry:
     pop rbp
 
     o64 sysret
+
+global back_to_system_stack
+; set rsp to self_task_system_stack
+; unable to restore original stack pointer
+back_to_system_stack:
+    mov rax, [self_task_system_stack]
+    cmp rax, 0
+    je  .exit
+    mov rsp, rax
+.exit
+    ret
 
 global load_tr
 load_tr:

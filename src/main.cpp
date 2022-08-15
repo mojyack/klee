@@ -192,11 +192,15 @@ class Kernel {
         if(virtio_gpu != nullptr) {
             if(auto result = virtio::gpu::initialize(*virtio_gpu)) {
                 gpu_device.emplace(std::move(result.as_value()));
-                debug::fb = fb.get();
             } else {
                 logger(LogLevel::Error, "failed to initilize virtio gpu: %d", result.as_error());
             }
         }
+
+        // TODO
+        // remove this
+        auto debug_fb = debug::Framebuffer(framebuffer_config);
+        debug::fb = &debug_fb;
 
         auto sata_controller = std::optional<ahci::Controller>();
         if(ahci_dev != nullptr) {

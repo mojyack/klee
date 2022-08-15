@@ -9,8 +9,8 @@ inline auto elf_startup(const uint64_t id, const int64_t data) -> void {
     auto& task = task::task_manager->get_current_task();
 
     // load image
-    const auto image    = std::unique_ptr<SmartFrameID>(reinterpret_cast<SmartFrameID*>(data));
-    auto&      page_map = task.get_page_map();
+    auto  image    = std::unique_ptr<SmartFrameID>(reinterpret_cast<SmartFrameID*>(data));
+    auto& page_map = task.get_page_map();
     page_map.reset(new PageMap());
 
     auto elf_info_result = elf::load_elf(*image.get(), page_map->upper_page_map, task);
@@ -18,6 +18,7 @@ inline auto elf_startup(const uint64_t id, const int64_t data) -> void {
         logger(LogLevel::Error, "failed to load image as elf: %d\n", elf_info_result.as_error().as_int());
         task.exit();
     }
+    image.reset();
     auto& elf_info             = elf_info_result.as_value();
     page_map->allocated_frames = std::move(elf_info.allocated_frames);
 
@@ -34,7 +35,7 @@ inline auto elf_startup(const uint64_t id, const int64_t data) -> void {
     page_map->allocated_frames.emplace_back(stack_frame.as_value(), 1);
 
     // [[ noreturn ]]
-    const auto code = jump_to_app(id, 0, segment::SegmentSelector{.bits = {3, 0, segment::SegmentNumber::UserStack}}.data, reinterpret_cast<uint64_t>(elf_info.entry), stack_frame_addr + (0x1000 - 8), &task.get_system_stack_pointer());
+    jump_to_app(id, 0, segment::SegmentSelector{.bits = {3, 0, segment::SegmentNumber::UserStack}}.data, reinterpret_cast<uint64_t>(elf_info.entry), stack_frame_addr + (0x1000 - 8), &task.get_system_stack_pointer());
     task.exit();
 }
 } // namespace task

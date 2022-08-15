@@ -2,7 +2,11 @@
 #include <array>
 
 #include "type.hpp"
-#include "task/manager.hpp"
+#include "task/task.hpp"
+
+namespace task {
+extern task::Task* kernel_task;
+}
 
 class Framebuffer {
   private:

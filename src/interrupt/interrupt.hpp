@@ -35,7 +35,6 @@ inline auto set_idt_entry(Vector index, const InterruptDescriptorAttribute attr,
 
 __attribute__((no_caller_saved_registers)) inline auto notify_end_of_interrupt() -> void {
     volatile auto end_of_interrupt = reinterpret_cast<uint32_t*>(0xFEE000B0);
-
     *end_of_interrupt = 0;
 }
 
@@ -101,7 +100,7 @@ inline auto initialize(timer::TimerManager& timer_manager) -> void {
     sie_ist(Vector::LAPICTimer, int_handler_lapic_timer_entry, ist_for_lapic_timer);
     sie(Vector::VirtIOGPUControl, internal::int_handler_virtio_gpu_control);
     sie(Vector::VirtIOGPUCursor, internal::int_handler_virtio_gpu_cursor);
-    load_idt(sizeof(internal::idt) - 1, reinterpret_cast<uintptr_t>(&internal::idt[0]));
+    load_idt(sizeof(internal::idt) - 1, reinterpret_cast<uintptr_t>(internal::idt.data()));
 
 #undef sie
 #undef sie_ist
