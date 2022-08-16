@@ -52,7 +52,7 @@ set_csss:
     mov rax, .next
     push rdi    ; CS
     push rax    ; RIP
-    o64 retf
+    retfq
 .next:
     mov rsp, rbp
     pop rbp
@@ -156,7 +156,7 @@ restore_context:
 
     mov rdi, [rdi + 0x60]
 
-    o64 iret
+    iretq
 
 extern self_task_system_stack
 global jump_to_app
@@ -172,7 +172,7 @@ jump_to_app:  ; void jump_to_app(uint64_t id, int64_t data, uint16_t ss(rdx), ui
     add rdx, 8
     push rdx  ; CS
     push rcx  ; RIP
-    o64 retf
+    retfq
 
 extern syscall_table
 global syscall_entry
@@ -205,7 +205,7 @@ back_to_system_stack:
     cmp rax, 0
     je  .exit
     mov rsp, rax
-.exit
+.exit:
     ret
 
 global load_tr
