@@ -29,13 +29,13 @@ out/loader.efi: KleeLoaderPkg/main.c KleeLoaderPkg/elf.c KleeLoaderPkg/memory.c
 out/stub.o: src/stub.cpp
 	${CXX} -o $@ $<
 
-out/asmcode.o: src/asmcode.asm src/asmcode.h
+out/asmcode.o: src/asmcode.asm
 	nasm -f elf64 -o $@ $<
 
 out/libc-support.o: src/libc-support.cpp
 	${CXX} -o $@ $<
 
-out/main.o: src/main.cpp src
+out/main.o: src/main.cpp $(shell find src/ -type f -name '*.hpp') $(shell find src/ -type f -name '*.h')
 	${CXX} -o $@ $<
 
 out/font.o: src/font.txt
