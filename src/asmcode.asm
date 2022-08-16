@@ -114,14 +114,10 @@ switch_context:
     pushfq
     pop qword [rsi + 0x10] ; RFLAGS
 
-    mov ax, cs
-    mov [rsi + 0x20], rax
-    mov bx, ss
-    mov [rsi + 0x28], rbx
-    mov cx, fs
-    mov [rsi + 0x30], rcx
-    mov dx, gs
-    mov [rsi + 0x38], rdx
+    mov [rsi + 0x20], cs
+    mov [rsi + 0x28], ss
+    mov [rsi + 0x30], fs
+    mov [rsi + 0x38], gs
 
     fxsave [rsi + 0xc0]
     ; fall through to restore_context
@@ -140,10 +136,8 @@ restore_context:
 
     mov rax, [rdi + 0x00]
     mov cr3, rax
-    mov rax, [rdi + 0x30]
-    mov fs, ax
-    mov rax, [rdi + 0x38]
-    mov gs, ax
+    mov fs, [rdi + 0x30]
+    mov gs, [rdi + 0x38]
 
     mov rax, [rdi + 0x40]
     mov rbx, [rdi + 0x48]
