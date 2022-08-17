@@ -104,6 +104,6 @@ class Result {
 
     Result(T&& data) : data(std::move(data)) {}
 
-    Result(const Error error) : data(error) {}
+    Result(const Error error = Error()) : data(error) {}
     Result(const Error::Code error) : data(error) {}
 };

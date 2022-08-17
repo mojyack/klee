@@ -12,6 +12,11 @@ namespace fs {
 enum class FileType : uint32_t {
     Regular,
     Directory,
+    Device,
+};
+
+enum class DeviceType : uint32_t {
+    None,
 };
 
 class Driver;
@@ -48,6 +53,7 @@ class OpenInfo {
     auto create(std::string_view name, FileType type) -> Result<OpenInfo>;
     auto readdir(size_t index) -> Result<OpenInfo>;
     auto remove(std::string_view name) -> Error;
+    auto get_device_type() -> DeviceType;
 
     auto is_busy() const -> bool {
         return read_count != 0 || write_count != 0 || child_count != 0 || mount != nullptr;
@@ -62,11 +68,11 @@ class OpenInfo {
     }
 
     OpenInfo(const std::string_view name, Driver& driver, const auto driver_data, const FileType type, const size_t filesize, const bool volume_root = false) : driver(&driver),
-                                                                                                                                                            driver_data((uintptr_t)driver_data),
-                                                                                                                                                            volume_root(volume_root),
-                                                                                                                                                            name(name),
-                                                                                                                                                            type(type),
-                                                                                                                                                            filesize(filesize) {}
+                                                                                                                                                                driver_data((uintptr_t)driver_data),
+                                                                                                                                                                volume_root(volume_root),
+                                                                                                                                                                name(name),
+                                                                                                                                                                type(type),
+                                                                                                                                                                filesize(filesize) {}
 
     // test stuff
     struct Testdata {
@@ -130,6 +136,10 @@ class Driver {
     virtual auto readdir(DriverData data, size_t index) -> Result<OpenInfo>                        = 0;
     virtual auto remove(DriverData data, std::string_view name) -> Error                           = 0;
 
+    virtual auto get_device_type(DriverData data) -> DeviceType {
+        return DeviceType::None;
+    }
+
     virtual auto get_root() -> OpenInfo& = 0;
 
     virtual ~Driver() = default;
@@ -188,5 +198,13 @@ inline auto OpenInfo::remove(const std::string_view name) -> Error {
         return Error::Code::FileOpened;
     }
     return driver->remove({type, filesize, driver_data}, name);
+}
+
+inline auto OpenInfo::get_device_type() -> DeviceType {
+    if(type != FileType::Device) {
+        return DeviceType::None;
+    }
+
+    return driver->get_device_type({type, filesize, driver_data});
 }
 } // namespace fs

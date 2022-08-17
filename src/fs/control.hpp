@@ -115,11 +115,21 @@ class Handle {
     }
 
     auto remove(const std::string_view name) -> Error {
+        if(!is_write_opened()) {
+            return Error::Code::FileNotOpened;
+        }
         return data->remove(name);
     }
 
     auto get_filesize() const -> size_t {
         return data->filesize;
+    }
+
+    auto get_device_type() const -> DeviceType {
+        if(data->type != FileType::Device) {
+            return DeviceType::None;
+        }
+        return data->get_device_type();
     }
 
     Handle(OpenInfo* const data, const OpenMode mode) : data(data), mode(mode) {}

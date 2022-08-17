@@ -10,7 +10,6 @@
 #include "debug.hpp"
 #include "fs/main.hpp"
 #include "interrupt/interrupt.hpp"
-#include "kernel-commands.hpp"
 #include "keyboard.hpp"
 #include "log.hpp"
 #include "memory-manager.hpp"
@@ -71,6 +70,15 @@ class Kernel {
         paging::setup_identity_page_table();
         memory_manager.initialize_heap();
 
+        // create task manager
+        // mutex needs this
+        auto tm            = task::TaskManager();
+        task::task_manager = &tm;
+
+        // create filesystem mananger
+        auto fs_manager = Critical<fs::FilesystemManager>();
+        fs::manager = &fs_manager;
+
         // set global objects
         allocator     = &memory_manager;
         const auto fb = std::unique_ptr<Framebuffer>(new uefi::Framebuffer(framebuffer_config));
@@ -99,10 +107,6 @@ class Kernel {
         // start timer
         timer::initialize_timer();
         auto timer_manager = timer::TimerManager();
-
-        // create task manager
-        auto tm            = task::TaskManager();
-        task::task_manager = &tm;
 
         // initialize idt
         interrupt::initialize(timer_manager);
@@ -207,12 +211,9 @@ class Kernel {
             sata_controller = ahci::initialize(*ahci_dev);
         }
 
-        // open filesystem manager
-        //{
-        auto& fs = task::task_manager->new_task();
-        fs.init_context(fs::main, reinterpret_cast<int64_t>(&sata_controller.value()));
-        fs.wakeup(1);
-        //}
+        auto& disk_finder = task::task_manager->new_task();
+        disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(&sata_controller.value()));
+        disk_finder.wakeup(1);
 
         // open terminal
         //{

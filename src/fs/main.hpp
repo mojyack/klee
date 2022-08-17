@@ -3,7 +3,6 @@
 #include "../block/drivers/cache.hpp"
 #include "../block/drivers/partition.hpp"
 #include "../block/gpt.hpp"
-#include "../kernel-commands.hpp"
 #include "../macro.hpp"
 #include "control.hpp"
 #include "drivers/fat/driver.hpp"
@@ -173,21 +172,27 @@ class FilesystemManager {
         return Error();
     }
 
-    auto get_mounts() const -> std::vector<commands::MountRecord> {
-        auto r = std::vector<commands::MountRecord>();
-        r.reserve(mount_records.size());
-        for(const auto& m : mount_records) {
-            r.emplace_back(commands::MountRecord{mdev_to_str(m.device), m.path});
-        }
-        return r;
+    auto get_mounts() const -> std::vector<MountRecord> {
+        return mount_records;
     }
 
     auto get_fs_root() -> fs::Controller& {
         return fs;
     }
 
-    FilesystemManager(ahci::Controller& controller) {
-        for(auto& dev : controller.get_devices()) {
+    auto set_sata_devices(std::vector<SataDevice> devices) -> void {
+        sata_devices = std::move(devices);
+    }
+};
+
+inline auto manager = (Critical<FilesystemManager>*)(nullptr);
+
+inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
+    {
+        auto& ahci_controller = *reinterpret_cast<ahci::Controller*>(data);
+        auto  sata_devices    = std::vector<SataDevice>();
+
+        for(auto& dev : ahci_controller.get_devices()) {
             auto& new_device = sata_devices.emplace_back(SataDevice{block::cache::Device<block::ahci::Device>(dev)});
             auto  partitions = block::gpt::find_partitions(new_device.device);
             if(partitions) {
@@ -196,44 +201,11 @@ class FilesystemManager {
                 }
             }
         }
+
+        auto [lock, man] = manager->access();
+        man.set_sata_devices(std::move(sata_devices));
     }
-};
 
-inline auto main(const uint64_t id, const int64_t data) -> void {
-    auto manager = FilesystemManager(*reinterpret_cast<ahci::Controller*>(data));
-
-    commands::list_blocks = [&manager]() -> std::vector<std::string> {
-        return manager.list_block_devices();
-    };
-
-    commands::mount = [&manager](const std::string_view device, const std::string_view path) -> Error {
-        return manager.mount(device, path);
-    };
-
-    commands::unmount = [&manager](const std::string_view path) -> Error {
-        return manager.unmount(path);
-    };
-
-    commands::get_mounts = [&manager]() -> std::vector<commands::MountRecord> {
-        return manager.get_mounts();
-    };
-
-    commands::get_filesystem_root = [&manager]() -> fs::Controller& {
-        return manager.get_fs_root();
-    };
-
-    printk("[fs] initialize done\n");
-    auto& this_task = task::task_manager->get_current_task();
-    while(true) {
-        const auto message = this_task.receive_message();
-        if(!message) {
-            this_task.sleep();
-            continue;
-        }
-        switch(message->type) {
-        default:
-            break;
-        }
-    }
+    task::task_manager->get_current_task().exit();
 }
 } // namespace fs

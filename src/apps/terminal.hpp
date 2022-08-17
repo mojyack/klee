@@ -1,5 +1,5 @@
 #pragma once
-#include "../kernel-commands.hpp"
+#include "../fs/main.hpp"
 #include "../mutex.hpp"
 #include "../task/elf-startup.hpp"
 #include "../util/variant.hpp"
@@ -42,8 +42,12 @@ static auto split(const std::string_view str) -> std::vector<std::string_view> {
 }
 
 #define handle_or(path)                                             \
-    auto& root          = commands::get_filesystem_root();          \
-    auto  handle_result = root.open(path, fs::OpenMode::Read);      \
+    auto handle_result = Result<fs::Handle>();                      \
+    {                                                               \
+        auto [lock, manager] = fs::manager->access();               \
+        auto& root           = manager.get_fs_root();               \
+        handle_result        = root.open(path, fs::OpenMode::Read); \
+    }                                                               \
     if(!handle_result) {                                            \
         print("open error: %d", handle_result.as_error().as_int()); \
         return;                                                     \
@@ -69,6 +73,12 @@ class Shell {
         return result;
     }
 
+    auto close_handle(const fs::Handle handle) -> Error {
+        auto [lock, manager] = fs::manager->access();
+        auto& root           = manager.get_fs_root();
+        return root.close(handle);
+    }
+
     auto interpret(const std::string_view arg) -> void {
         const auto argv = split(arg);
         if(argv.size() == 0) {
@@ -83,22 +93,34 @@ class Shell {
                 putc(printk_buffer.buffer[(i + printk_buffer.head) % printk_buffer.buffer.size()]);
             }
         } else if(argv[0] == "lsblk") {
-            const auto disks = commands::list_blocks();
+            auto disks = std::vector<std::string>();
+            {
+                auto [lock, manager] = fs::manager->access();
+                disks                = manager.list_block_devices();
+            }
             for(const auto& d : disks) {
                 puts(d.data());
             }
         } else if(argv[0] == "mount") {
             if(argv.size() == 1) {
-                const auto mounts = commands::get_mounts();
+                auto mounts = std::vector<fs::MountRecord>();
+                {
+                    auto [lock, manager] = fs::manager->access();
+                    mounts               = manager.get_mounts();
+                }
                 if(mounts.empty()) {
                     puts("(no mounts)");
                     return;
                 }
                 for(const auto& m : mounts) {
-                    print("%s on \"%s\"\n", m.device.data(), m.path.data());
+                    print("%s on \"%s\"\n", fs::mdev_to_str(m.device).data(), m.path.data());
                 }
             } else if(argv.size() == 3) {
-                const auto e = commands::mount(argv[1], argv[2]);
+                auto e = Error();
+                {
+                    auto [lock, manager] = fs::manager->access();
+                    e                    = manager.mount(argv[1], argv[2]);
+                }
                 if(e) {
                     print("mount error: %d\n", e.as_int());
                 }
@@ -111,7 +133,11 @@ class Shell {
                 puts("usage: umount MOUNTPOINT");
                 return;
             }
-            const auto e = commands::unmount(argv[1]);
+            auto e = Error();
+            {
+                auto [lock, manager] = fs::manager->access();
+                e                    = manager.unmount(argv[1]);
+            }
             if(e) {
                 print("unmount error: %d\n", e.as_int());
             }
@@ -134,7 +160,7 @@ class Shell {
                 puts(o.name);
                 putc('\n');
             }
-            root.close(handle);
+            close_handle(handle);
         } else if(argv[0] == "cat") {
             if(argv.size() != 2) {
                 puts("usage: cat FILE");
@@ -145,7 +171,7 @@ class Shell {
                 auto c = char();
                 if(const auto e = handle.read(i, 1, &c)) {
                     print("read error: %d\n", e.as_int());
-                    root.close(handle);
+                    close_handle(handle);
                     return;
                 }
                 if(c >= 0x20) {
@@ -165,7 +191,7 @@ class Shell {
                     break;
                 }
             }
-            root.close(handle);
+            close_handle(handle);
         } else if(argv[0] == "run") {
             if(argv.size() != 2) {
                 puts("usage: run FILE");
@@ -176,13 +202,13 @@ class Shell {
             auto       code_frames_result = allocator->allocate(num_frames);
             if(!code_frames_result) {
                 print("failed to allocate frames for code: %d\n", code_frames_result.as_error());
-                root.close(handle);
+                close_handle(handle);
                 return;
             }
             auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(code_frames_result.as_value(), num_frames));
             if(const auto e = handle.read(0, handle.get_filesize(), (*code_frames)->get_frame())) {
                 print("file read error: %d\n", e.as_int());
-                root.close(handle);
+                close_handle(handle);
                 return;
             }
 
@@ -193,7 +219,7 @@ class Shell {
                 [[maybe_unused]] const auto raw_ptr = code_frames.release();
                 task->wakeup();
             }
-            root.close(handle);
+            close_handle(handle);
             task::task_manager->wait_task(task);
         } else {
             puts("unknown command");
