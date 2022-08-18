@@ -47,6 +47,8 @@ class Error {
         EndOfFile,
         // FAT
         NotFAT,
+        // devfs
+        InvalidDeviceType,
         // block
         NotMBR,
         NotGPT,

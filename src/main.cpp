@@ -8,6 +8,7 @@
 #include "apps/wallpaper.hpp"
 #include "asmcode.h"
 #include "debug.hpp"
+#include "devfs/framebuffer.hpp"
 #include "fs/main.hpp"
 #include "interrupt/interrupt.hpp"
 #include "keyboard.hpp"
@@ -69,18 +70,46 @@ class Kernel {
         segment::setup_segments();
         paging::setup_identity_page_table();
         memory_manager.initialize_heap();
+        allocator = &memory_manager;
 
         // create task manager
         // mutex needs this
         auto tm            = task::TaskManager();
         task::task_manager = &tm;
 
+        // create debug output
+        // TODO
+        // remove this
+        auto debug_fb = debug::Framebuffer(framebuffer_config);
+        debug::fb     = &debug_fb;
+
         // create filesystem mananger
         auto fs_manager = Critical<fs::FilesystemManager>();
-        fs::manager = &fs_manager;
+        fs::manager     = &fs_manager;
+        // mount "/dev"
+        {
+            auto& manager = fs::manager->unsafe_access(); // no other threads exist here
+            if(const auto e = manager.mount("devfs", "/dev")) {
+                debug::println("failed to mount \"/dev\": ", e.as_int());
+                return;
+            }
+        }
 
+        // create uefi framebuffer
+        auto gop_framebuffer = devfs::GOPFrameBuffer(framebuffer_config);
+        {
+            auto& manager     = fs::manager->unsafe_access();
+            auto  open_result = manager.get_fs_root().open("/dev", fs::OpenMode::Write);
+            if(!open_result) {
+                debug::println("failed to open \"/dev\": ", open_result.as_error().as_int());
+                return;
+            }
+            auto& dev = open_result.as_value();
+            dev.create_device("fb0", fs::DeviceType::Framebuffer, reinterpret_cast<uint64_t>(&gop_framebuffer));
+            manager.get_fs_root().close(dev);
+        }
         // set global objects
-        allocator     = &memory_manager;
+
         const auto fb = std::unique_ptr<Framebuffer>(new uefi::Framebuffer(framebuffer_config));
         framebuffer   = fb.get();
 
@@ -201,11 +230,6 @@ class Kernel {
             }
         }
 
-        // TODO
-        // remove this
-        auto debug_fb = debug::Framebuffer(framebuffer_config);
-        debug::fb = &debug_fb;
-
         auto sata_controller = std::optional<ahci::Controller>();
         if(ahci_dev != nullptr) {
             sata_controller = ahci::initialize(*ahci_dev);
@@ -225,6 +249,8 @@ class Kernel {
 
         auto refresh_screen_done = true;
         auto refresh_pending     = false;
+
+        printk("klee.\n");
 
     loop:
         __asm__("cli");

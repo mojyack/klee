@@ -17,7 +17,6 @@ struct PrintBuffer {
 inline auto printk_buffer = PrintBuffer();
 
 inline auto printk(std::span<char> buf) -> int {
-    debug::debug_print(buf.data());
     const auto buf_len = buf.size();
 
     if(buf_len >= printk_buffer.buffer.size()) {

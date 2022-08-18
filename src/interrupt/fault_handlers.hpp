@@ -7,16 +7,11 @@
 
 namespace interrupt {
 inline auto print_stackframe(const InterruptFrame& frame) -> void {
-    debug::debug_print("CS");
-    debug::debug_print(debug::print_hex(frame.cs).data());
-    debug::debug_print("RIP");
-    debug::debug_print(debug::print_hex(frame.rip).data());
-    debug::debug_print("RFLAGS");
-    debug::debug_print(debug::print_hex(frame.rflags).data());
-    debug::debug_print("SS");
-    debug::debug_print(debug::print_hex(frame.ss).data());
-    debug::debug_print("RSP");
-    debug::debug_print(debug::print_hex(frame.rsp).data());
+    debug::println("CS: ", frame.cs);
+    debug::println("RIP: ", frame.rip);
+    debug::println("RFLAGS: ", frame.rflags);
+    debug::println("SS: ", frame.ss);
+    debug::println("RSP: ", frame.rsp);
 }
 
 #pragma clang diagnostic push
@@ -25,9 +20,8 @@ inline auto print_stackframe(const InterruptFrame& frame) -> void {
 #define int_handler_with_error(name)                                                                                          \
     __attribute__((interrupt)) static auto int_handler_##name(InterruptFrame* const frame, const uint64_t error_code)->void { \
         try_kill_app(*frame, #name);                                                                                          \
-        debug::debug_print("interrupt(" #name ")");                                                                           \
-        debug::debug_print("code");                                                                                           \
-        debug::debug_print(debug::print_hex(error_code).data());                                                              \
+        debug::println("interrupt(" #name ")");                                                                               \
+        debug::println("code: ", error_code);                                                                                 \
         print_stackframe(*frame);                                                                                             \
         while(true) {                                                                                                         \
             __asm__("hlt");                                                                                                   \
@@ -37,7 +31,7 @@ inline auto print_stackframe(const InterruptFrame& frame) -> void {
 #define int_handler(name)                                                                          \
     __attribute__((interrupt)) static auto int_handler_##name(InterruptFrame* const frame)->void { \
         try_kill_app(*frame, #name);                                                               \
-        debug::debug_print("interrupt(" #name ")");                                                \
+        debug::println("interrupt(" #name ")");                                                    \
         print_stackframe(*frame);                                                                  \
         while(true) {                                                                              \
             __asm__("hlt");                                                                        \

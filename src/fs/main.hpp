@@ -5,6 +5,7 @@
 #include "../block/gpt.hpp"
 #include "../macro.hpp"
 #include "control.hpp"
+#include "drivers/dev.hpp"
 #include "drivers/fat/driver.hpp"
 #include "drivers/tmp.hpp"
 
@@ -19,11 +20,13 @@ struct Partition {
     size_t part;
 };
 
+struct Devfs {};
+
 struct Tmpfs {};
 
 struct Unknown {};
 
-using MountDev = std::variant<Disk, Partition, Tmpfs, Unknown>;
+using MountDev = std::variant<Disk, Partition, Devfs, Tmpfs, Unknown>;
 } // namespace mountdev
 
 inline auto str_to_mdev(const std::string_view device) -> mountdev::MountDev {
@@ -35,6 +38,8 @@ inline auto str_to_mdev(const std::string_view device) -> mountdev::MountDev {
         } else {
             return mountdev::Unknown{};
         }
+    } else if(device == "devfs") {
+        return mountdev::Devfs{};
     } else if(device == "tmpfs") {
         return mountdev::Tmpfs{};
     } else {
@@ -53,6 +58,8 @@ inline auto mdev_to_str(const mountdev::MountDev& mdev) -> std::string {
         auto        buf  = std::array<char, 12>();
         snprintf(buf.data(), buf.size(), "disk%lup%lu", disk.disk, disk.part);
         return buf.data();
+    } else if(std::holds_alternative<mountdev::Devfs>(mdev)) {
+        return "devfs";
     } else if(std::holds_alternative<mountdev::Tmpfs>(mdev)) {
         return "tmpfs";
     } else {
@@ -80,6 +87,7 @@ class FilesystemManager {
   private:
     std::vector<SataDevice>                       sata_devices;
     fs::Controller                                fs;
+    dev::Driver                                   devfs_driver;
     std::vector<std::unique_ptr<fs::tmp::Driver>> tmpfs_drivers;
     std::vector<MountRecord>                      mount_records;
 
@@ -139,6 +147,9 @@ class FilesystemManager {
             error_or(fs.mount(path, *fat_driver.get()));
             p.filesystem = std::move(fat_driver);
             fs_driver    = p.filesystem.get();
+        } else if(std::holds_alternative<mountdev::Devfs>(mdev)) {
+            error_or(fs.mount(path, devfs_driver));
+            fs_driver = &devfs_driver;
         } else if(std::holds_alternative<mountdev::Tmpfs>(mdev)) {
             auto tmp_driver = std::unique_ptr<fs::tmp::Driver>(new fs::tmp::Driver());
             error_or(fs.mount(path, *tmp_driver.get()));
@@ -154,19 +165,24 @@ class FilesystemManager {
     auto unmount(const std::string_view path) -> Error {
         value_or(freed_device, fs.unmount(path));
 
-        for(auto i = mount_records.begin(); i != mount_records.end(); i += 1) {
-            if(i->fs_driver == freed_device) {
-                if(std::holds_alternative<mountdev::Tmpfs>(i->device)) {
-                    for(auto i = tmpfs_drivers.begin(); i != tmpfs_drivers.end(); i += 1) {
-                        if(i->get() == freed_device) {
-                            tmpfs_drivers.erase(i);
-                            break;
-                        }
+        for(auto i = mount_records.rbegin(); i != mount_records.rend(); i += 1) {
+            if(i->path != path) {
+                continue;
+            }
+            if(std::holds_alternative<mountdev::Partition>(i->device)) {
+                const auto& part = std::get<mountdev::Partition>(i->device);
+                auto&       p    = sata_devices[part.disk].partitions[part.part];
+                p.filesystem.reset();
+            } else if(std::holds_alternative<mountdev::Tmpfs>(i->device)) {
+                for(auto i = tmpfs_drivers.begin(); i != tmpfs_drivers.end(); i += 1) {
+                    if(i->get() == freed_device) {
+                        tmpfs_drivers.erase(i);
+                        break;
                     }
                 }
-                mount_records.erase(i);
-                break;
             }
+            mount_records.erase(std::next(i).base());
+            break;
         }
 
         return Error();

@@ -17,6 +17,13 @@ enum class FileType : uint32_t {
 
 enum class DeviceType : uint32_t {
     None,
+    Framebuffer,
+};
+
+enum class DeviceOperation{
+    // Framebuffer
+    GetSize,
+    Swap,
 };
 
 class Driver;
@@ -39,7 +46,6 @@ class OpenInfo {
     std::string name;
     uint32_t    read_count  = 0;
     uint32_t    write_count = 0;
-    uint32_t    child_count = 0;
     FileType    type;
     size_t      filesize;
     OpenInfo*   parent = nullptr;
@@ -53,10 +59,12 @@ class OpenInfo {
     auto create(std::string_view name, FileType type) -> Result<OpenInfo>;
     auto readdir(size_t index) -> Result<OpenInfo>;
     auto remove(std::string_view name) -> Error;
-    auto get_device_type() -> DeviceType;
+    auto get_device_type() -> DeviceType; // can be used without opening
+    auto create_device(std::string_view name, DeviceType type, uint64_t driver_impl) -> Result<OpenInfo>;
+    auto control_device(DeviceOperation op, void* arg) -> Error;
 
     auto is_busy() const -> bool {
-        return read_count != 0 || write_count != 0 || child_count != 0 || mount != nullptr;
+        return read_count != 0 || write_count != 0 || !children.empty() || mount != nullptr;
     }
 
     auto is_volume_root() const -> bool {
@@ -79,14 +87,13 @@ class OpenInfo {
         std::string                               name;
         uint32_t                                  read_count  = 0;
         uint32_t                                  write_count = 0;
-        uint32_t                                  child_count = 0;
         FileType                                  type;
         std::shared_ptr<Testdata>                 mount;
         std::unordered_map<std::string, Testdata> children;
     };
 
     auto test_compare(const Testdata& data) const -> bool {
-        if(name != data.name || read_count != data.read_count || write_count != data.write_count || child_count != data.child_count || type != data.type) {
+        if(name != data.name || read_count != data.read_count || write_count != data.write_count || type != data.type) {
             return false;
         }
         if(children.size() != data.children.size()) {
@@ -138,6 +145,14 @@ class Driver {
 
     virtual auto get_device_type(DriverData data) -> DeviceType {
         return DeviceType::None;
+    }
+
+    virtual auto create_device(DriverData data, std::string_view name, DeviceType device_type, uint64_t driver_impl) -> Result<OpenInfo> {
+        return Error::Code::NotImplemented;
+    }
+    
+    virtual auto control_device(DriverData data, DeviceOperation op, void* arg) -> Error {
+        return Error::Code::NotImplemented;
     }
 
     virtual auto get_root() -> OpenInfo& = 0;
@@ -206,5 +221,23 @@ inline auto OpenInfo::get_device_type() -> DeviceType {
     }
 
     return driver->get_device_type({type, filesize, driver_data});
+}
+
+inline auto OpenInfo::create_device(const std::string_view name, const DeviceType device_type, uint64_t driver_impl) -> Result<OpenInfo> {
+    if(!check_opened(true)) {
+        return Error::Code::FileNotOpened;
+    }
+    
+    return driver->create_device({type, filesize, driver_data}, name, device_type, driver_impl);
+}
+
+inline auto OpenInfo::control_device(const DeviceOperation op, void* const arg) -> Error {
+    // TODO
+    // is this control requires write access?
+    if(!check_opened(false)) {
+        return Error::Code::FileNotOpened;
+    }
+
+    return driver->control_device({type, filesize, driver_data}, op, arg);
 }
 } // namespace fs

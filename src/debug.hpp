@@ -29,7 +29,7 @@ class Framebuffer : public ::Framebuffer {
 inline auto fb = (Framebuffer*)(nullptr);
 
 template <std::integral T>
-auto print_hex(const T value) -> std::array<char, sizeof(T) * 2 + 1> {
+auto itos(const T value) -> std::array<char, sizeof(T) * 2 + 1> {
     auto r = std::array<char, sizeof(T) * 2 + 1>();
 
     for(auto i = 0; i < sizeof(T) * 2; i += 1) {
@@ -65,25 +65,45 @@ inline auto draw_string(const Point point, const std::string_view str) -> void {
     }
 }
 
-inline auto debug_print(const std::string_view str) -> void {
-    if(fb == nullptr) {
-        return;
+inline auto cursor = std::array<int, 2>{0, 0};
+
+template <class T>
+concept Printable = std::integral<T> || std::is_convertible_v<T, std::string_view>;
+
+inline auto print(const std::string_view str) -> void {
+    const auto font_size = get_font_size();
+    draw_string(Point(cursor[0], cursor[1]), str.data());
+    cursor[1] += font_size[0] * str.size();
+}
+
+template <std::integral T>
+inline auto print(T value) -> void {
+    auto str = itos(value);
+    print(std::string_view(str.data(), str.size()));
+}
+
+template <Printable Arg, Printable... Args>
+inline auto print(Arg arg, Args... args) -> void {
+    print(arg);
+    if constexpr(sizeof...(args) >= 1) {
+        print(args...);
     }
+}
 
-    static auto pos = 0;
+template <Printable... Args>
+inline auto println(Args... args) -> void {
+    print(args...);
 
-    auto increment_pos = [](const int a, const auto b) -> void {
-        pos += a;
-        if(pos + b >= fb->get_size()[1]) {
-            pos = 0;
-        }
-    };
+    constexpr auto line_width = 2;
 
     const auto size      = fb->get_size();
     const auto font_size = get_font_size();
-    fb->write_rect(Point(0, pos), Point(size[0], pos + font_size[1]), RGBColor(0x000000));
-    draw_string(Point(0, pos), str);
-    increment_pos(font_size[1], 2);
-    fb->write_rect(Point(0, pos), Point(size[0], pos + 2), RGBColor(0xFFFFFF));
+    cursor[1] += font_size[1];
+    if(cursor[1] + line_width >= size[1]) {
+        cursor[1] = 0;
+    }
+    cursor[0] = 0;
+    fb->write_rect(Point(0, cursor[1]), Point(size[0], cursor[1] + font_size[1]), RGBColor(0x000000));
+    fb->write_rect(Point(0, cursor[1] + font_size[1]), Point(size[0], cursor[1] + font_size[1] + line_width), RGBColor(0xFFFFFF));
 }
 } // namespace debug
