@@ -14,8 +14,8 @@ class GOPFrameBuffer : public fs::dev::FramebufferDevice {
     }
 
     GOPFrameBuffer(const FramebufferConfig& config) {
-        data = backbuffer.data();
-        size = {config.horizontal_resolution, config.vertical_resolution};
+        data        = backbuffer.data();
+        buffer_size = {config.horizontal_resolution, config.vertical_resolution};
     }
 };
 }; // namespace devfs

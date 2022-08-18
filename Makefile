@@ -94,7 +94,6 @@ run_debug: run_prep
 	-bios ovmf/OVMF.fd \
 	-cpu host,kvm=off \
 	-display sdl \
-	-enable-kvm \
 	-m 512M \
 	-boot order=c \
 	-device virtio-gpu,xres=1280,yres=1024 \

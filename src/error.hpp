@@ -32,6 +32,7 @@ class Error {
         // filesystem
         IOError,
         InvalidData,
+        InvalidSize,
         InvalidSector,
         NotDirectory,
         NotFile,
@@ -49,6 +50,7 @@ class Error {
         NotFAT,
         // devfs
         InvalidDeviceType,
+        InvalidDeviceOperation,
         // block
         NotMBR,
         NotGPT,

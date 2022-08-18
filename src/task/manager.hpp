@@ -1,8 +1,8 @@
 #pragma once
 #include "task.hpp"
 
-#include "../debug.hpp"
 #include "../asmcode.h"
+#include "../debug.hpp"
 #include "../error.hpp"
 #include "../mutex-like.hpp"
 #include "../util/container-of.hpp"
@@ -22,14 +22,16 @@ class TaskManager {
         ManagedTask(const uint64_t id) : task(id) {}
     };
 
-    std::atomic<Task*>                                       lock;
-    std::atomic<Task*>                                       self_task; // mirror of running[current_nice].front()
-    std::vector<std::unique_ptr<ManagedTask>>                tasks;
-    std::array<std::deque<ManagedTask*>, max_nice + 1>       running;
-    uint64_t                                                 last_id      = 0;
-    int                                                      current_nice = 0;
-    bool                                                     nice_changed = false;
-    std::unordered_map<uintptr_t, std::vector<ManagedTask*>> wait_address_tasks;
+    std::atomic<Task*>                                 lock;
+    std::atomic<Task*>                                 self_task; // mirror of running[current_nice].front()
+    std::vector<std::unique_ptr<ManagedTask>>          tasks;
+    std::array<std::deque<ManagedTask*>, max_nice + 1> running;
+    uint64_t                                           last_id      = 0;
+    int                                                current_nice = 0;
+    bool                                               nice_changed = false;
+
+    std::atomic_uint64_t                                    last_event_id = 1; // event_id(0) is reserved for manager
+    std::unordered_map<uint64_t, std::vector<ManagedTask*>> events;
 
     std::vector<ManagedTask*> delete_queue;
 
@@ -86,7 +88,7 @@ class TaskManager {
     // this functions unlocks lock
     auto exit_managed_task(ManagedTask* const task) -> void {
         delete_queue.emplace_back(task);
-        notify_address_locked(this);
+        notify_event_locked(0);
         sleep(task);
     }
 
@@ -111,7 +113,7 @@ class TaskManager {
                 release_lock();
                 return;
             }
-            wait_address(this, container_of(self_task.load(), &ManagedTask::task));
+            wait_event(0, container_of(self_task.load(), &ManagedTask::task));
         }
     }
 
@@ -148,22 +150,14 @@ class TaskManager {
     }
 
     // this functions unlocks lock
-    auto wait_address(const void* const address, ManagedTask* const task) -> void {
-        const auto key = reinterpret_cast<uintptr_t>(address);
-        const auto p   = wait_address_tasks.find(key);
-        if(p == wait_address_tasks.end()) {
-            // bug
-            release_lock();
-            return;
-        }
-        p->second.emplace_back(task);
+    auto wait_event(const uint64_t event_id, ManagedTask* const task) -> void {
+        events[event_id].emplace_back(task);
         sleep(task);
     }
 
-    auto notify_address_locked(const void* const address) -> void {
-        const auto key = reinterpret_cast<uintptr_t>(address);
-        const auto p   = wait_address_tasks.find(key);
-        if(p != wait_address_tasks.end()) {
+    auto notify_event_locked(const uint64_t event_id) -> void {
+        const auto p = events.find(event_id);
+        if(p != events.end()) {
             const auto to_notify = std::move(p->second);
             for(auto task : to_notify) {
                 wakeup(task, -1);
@@ -198,21 +192,13 @@ class TaskManager {
         return *current_task;
     }
 
-    auto switch_task_locked(Task* const next_task) -> void {
-        next_task->apply_page_map();
-        auto current_task = self_task.load();
-        __asm__("cli");
-        update_self_task(*next_task);
-        next_task->get_context().rflags |= 0b1000000000; // interrupt enable
-        switch_context(&next_task->get_context(), &current_task->get_context());
-    }
-
     // this function unlocks lock
     auto switch_task_locked(const bool sleep_current = false) -> void {
-        auto current_task = &rotate_run_queue(sleep_current);
-        const auto next_task = running[current_nice].front();
+        auto       current_task = &rotate_run_queue(sleep_current);
+        const auto next_task    = running[current_nice].front();
 
         if(current_task == next_task) {
+            release_lock();
             return;
         }
 
@@ -227,7 +213,7 @@ class TaskManager {
     // this function unlocks lock
     auto switch_task_locked(TaskContext& context) -> void {
         const auto current_task = &rotate_run_queue(false);
-        const auto next_task = running[current_nice].front();
+        const auto next_task    = running[current_nice].front();
         memcpy(&current_task->task.get_context(), &context, sizeof(TaskContext));
 
         if(current_task == next_task) {
@@ -254,7 +240,7 @@ class TaskManager {
             if(lock.compare_exchange_weak(expected, self_task)) {
                 return;
             }
-            switch_task_locked(expected);
+            switch_task(expected);
         }
     }
 
@@ -283,6 +269,17 @@ class TaskManager {
         aquire_lock();
         switch_task_locked(sleep_current);
     }
+
+    // this function is thread-safe
+    auto switch_task(Task* const next_task) -> void {
+        next_task->apply_page_map();
+        auto current_task = self_task.load();
+        __asm__("cli");
+        update_self_task(*next_task);
+        next_task->get_context().rflags |= 0b1000000000; // interrupt enable
+        switch_context(&next_task->get_context(), &current_task->get_context());
+    }
+
 
     // called by timer interrupt
     auto switch_task_may_fail(TaskContext& context) -> void {
@@ -348,33 +345,24 @@ class TaskManager {
         return *self_task.load();
     }
 
-    auto add_wait_address(const void* const address) -> void {
+    auto new_event() -> uint64_t {
+        return last_event_id.fetch_add(1);
+    }
+
+    auto delete_event(const uint64_t event_id) -> void {
         aquire_lock();
-        const auto key = reinterpret_cast<uintptr_t>(address);
-        if(wait_address_tasks.find(key) == wait_address_tasks.end()) {
-            wait_address_tasks.emplace(key, std::vector<ManagedTask*>());
-        }
+        events.erase(event_id);
         release_lock();
     }
 
-    auto erase_wait_address(const void* const address) -> void {
+    auto wait_event(const uint64_t event_id, Task* const task) -> void {
         aquire_lock();
-        const auto key = reinterpret_cast<uintptr_t>(address);
-        const auto p   = wait_address_tasks.find(key);
-        if(p != wait_address_tasks.end()) {
-            wait_address_tasks.erase(p);
-        }
-        release_lock();
+        wait_event(event_id, container_of(task, &ManagedTask::task));
     }
 
-    auto wait_address(const void* const address, Task* const task) -> void {
+    auto notify_event(const uint64_t event_id) -> void {
         aquire_lock();
-        wait_address(address, container_of(task, &ManagedTask::task));
-    }
-
-    auto notify_address(const void* const address) -> void {
-        aquire_lock();
-        notify_address_locked(address);
+        notify_event_locked(event_id);
         release_lock();
     }
 
@@ -390,8 +378,6 @@ class TaskManager {
         idle.nice    = max_nice;
         idle.running = true;
         running[max_nice].push_back(&idle);
-
-        wait_address_tasks.emplace(reinterpret_cast<uintptr_t>(this), std::vector<ManagedTask*>());
     }
 };
 
@@ -415,8 +401,8 @@ inline auto Task::wakeup_may_fail() -> void {
     task_manager->wakeup_may_fail(this);
 }
 
-inline auto Task::wait_address(const void* const address) -> void {
-    task_manager->wait_address(address, this);
+inline auto Task::wait_event(const uint64_t event_id) -> void {
+    task_manager->wait_event(event_id, this);
 }
 
 inline auto kernel_task = (Task*)(nullptr);

@@ -28,6 +28,7 @@
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
+#include "terminal.hpp"
 
 class Kernel {
   private:
@@ -97,17 +98,10 @@ class Kernel {
 
         // create uefi framebuffer
         auto gop_framebuffer = devfs::GOPFrameBuffer(framebuffer_config);
-        {
-            auto& manager     = fs::manager->unsafe_access();
-            auto  open_result = manager.get_fs_root().open("/dev", fs::OpenMode::Write);
-            if(!open_result) {
-                debug::println("failed to open \"/dev\": ", open_result.as_error().as_int());
-                return;
-            }
-            auto& dev = open_result.as_value();
-            dev.create_device("fb0", fs::DeviceType::Framebuffer, reinterpret_cast<uint64_t>(&gop_framebuffer));
-            manager.get_fs_root().close(dev);
+        if(devfs::create_device_file("fb-uefi0", reinterpret_cast<uintptr_t>(&gop_framebuffer))) {
+            return;
         }
+
         // set global objects
 
         const auto fb = std::unique_ptr<Framebuffer>(new uefi::Framebuffer(framebuffer_config));
@@ -208,8 +202,12 @@ class Kernel {
         xhc.run();
 
         // connect usb devices
+        auto usb_keyboard = devfs::USBKeyboard();
+        if(devfs::create_device_file("keyboard-usb0", reinterpret_cast<uintptr_t>(&usb_keyboard))) {
+            return;
+        }
         mouse::setup();
-        keyboard::setup();
+        keyboard::setup(usb_keyboard);
 
         for(auto i = 1; i <= xhc.get_max_ports(); i += 1) {
             auto port = xhc.get_port_at(i);
@@ -241,10 +239,15 @@ class Kernel {
 
         // open terminal
         //{
-        auto& term = task::task_manager->new_task();
-        term.init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
-        term.wakeup();
+        auto& guiterm = task::task_manager->new_task();
+        guiterm.init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
+        guiterm.wakeup();
         //}
+        
+        auto& term = task::task_manager->new_task();
+        term.init_context(terminal::main, 0);
+        term.wakeup();
+
         refresh();
 
         auto refresh_screen_done = true;
@@ -260,11 +263,8 @@ class Kernel {
             task::kernel_task->sleep();
             goto loop;
         }
-        // if(message->type != MessageType::RefreshScreenDone) {
-        //     auto buf = std::array<char, 128>();
-        //     snprintf(buf.data(), buf.size(), "loop %d %p %p %p", message->type, task::kernel_task, &fs, &term);
-        //     debug::debug_print(buf.data());
-        // }
+
+        //debug::println("event %d\n", (int)message->type);
 
         switch(message->type) {
         case MessageType::XHCIInterrupt:

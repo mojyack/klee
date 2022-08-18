@@ -73,10 +73,10 @@ class Shell {
         return result;
     }
 
-    auto close_handle(const fs::Handle handle) -> Error {
+    auto close_handle(fs::Handle handle) -> Error {
         auto [lock, manager] = fs::manager->access();
         auto& root           = manager.get_fs_root();
-        return root.close(handle);
+        return root.close(std::move(handle));
     }
 
     auto interpret(const std::string_view arg) -> void {
@@ -160,7 +160,7 @@ class Shell {
                 puts(o.name);
                 putc('\n');
             }
-            close_handle(handle);
+            close_handle(std::move(handle));
         } else if(argv[0] == "cat") {
             if(argv.size() != 2) {
                 puts("usage: cat FILE");
@@ -169,9 +169,9 @@ class Shell {
             handle_or(argv[1]);
             for(auto i = size_t(0); i < handle.get_filesize(); i += 1) {
                 auto c = char();
-                if(const auto e = handle.read(i, 1, &c)) {
-                    print("read error: %d\n", e.as_int());
-                    close_handle(handle);
+                if(const auto read = handle.read(i, 1, &c); !read) {
+                    print("read error: %d\n", read.as_error().as_int());
+                    close_handle(std::move(handle));
                     return;
                 }
                 if(c >= 0x20) {
@@ -191,7 +191,7 @@ class Shell {
                     break;
                 }
             }
-            close_handle(handle);
+            close_handle(std::move(handle));
         } else if(argv[0] == "run") {
             if(argv.size() != 2) {
                 puts("usage: run FILE");
@@ -202,13 +202,13 @@ class Shell {
             auto       code_frames_result = allocator->allocate(num_frames);
             if(!code_frames_result) {
                 print("failed to allocate frames for code: %d\n", code_frames_result.as_error());
-                close_handle(handle);
+                close_handle(std::move(handle));
                 return;
             }
             auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(code_frames_result.as_value(), num_frames));
-            if(const auto e = handle.read(0, handle.get_filesize(), (*code_frames)->get_frame())) {
-                print("file read error: %d\n", e.as_int());
-                close_handle(handle);
+            if(const auto read = handle.read(0, handle.get_filesize(), (*code_frames)->get_frame()); !read) {
+                print("file read error: %d\n", read.as_error().as_int());
+                close_handle(std::move(handle));
                 return;
             }
 
@@ -219,7 +219,7 @@ class Shell {
                 [[maybe_unused]] const auto raw_ptr = code_frames.release();
                 task->wakeup();
             }
-            close_handle(handle);
+            close_handle(std::move(handle));
             task::task_manager->wait_task(task);
         } else {
             puts("unknown command");

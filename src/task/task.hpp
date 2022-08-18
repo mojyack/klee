@@ -97,7 +97,7 @@ class Task {
     auto sleep() -> Task&;
     auto wakeup(int nice = -1) -> Task&;
     auto wakeup_may_fail() -> void; // used by interrupt
-    auto wait_address(const void* const address) -> void;
+    auto wait_event(uint64_t event_id) -> void;
 
     // for task_manager
 

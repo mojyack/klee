@@ -47,7 +47,9 @@ class File : public Object {
     }
 
     template <bool write>
-    auto copy(const size_t offset, size_t size, std::conditional_t<write, const uint8_t*, uint8_t*> buffer) -> Error {
+    auto copy(const size_t offset, size_t size, std::conditional_t<write, const uint8_t*, uint8_t*> buffer) -> Result<size_t> {
+        const auto total_size = size;
+
         if(offset + size > filesize) {
             return Error::Code::EndOfFile;
         }
@@ -75,15 +77,15 @@ class File : public Object {
             memory_copy<write>(buffer, data_at(frame_index), size);
         }
 
-        return Error();
+        return size_t(total_size);
     }
 
   public:
-    auto read(const size_t offset, const size_t size, uint8_t* const buffer) -> Error {
+    auto read(const size_t offset, const size_t size, uint8_t* const buffer) -> Result<size_t> {
         return copy<false>(offset, size, static_cast<uint8_t*>(buffer));
     }
 
-    auto write(const size_t offset, const size_t size, const void* const buffer) -> Error {
+    auto write(const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> {
         return copy<true>(offset, size, static_cast<const uint8_t*>(buffer));
     }
 
@@ -155,8 +157,8 @@ class Driver : public fs::Driver {
     OpenInfo                      root;
 
     template <FileObject T>
-    auto data_as(const DriverData& data) -> Result<T*> {
-        auto& obj = *reinterpret_cast<std::variant<File, Directory>*>(data.num);
+    auto data_as(const uintptr_t data) -> Result<T*> {
+        auto& obj = *reinterpret_cast<std::variant<File, Directory>*>(data);
         if(!std::holds_alternative<T>(obj)) {
             return std::is_same_v<T, File> ? Error::Code::NotFile : Error::Code::NotDirectory;
         }
@@ -174,25 +176,25 @@ class Driver : public fs::Driver {
     }
 
   public:
-    auto read(const DriverData data, const size_t offset, const size_t size, void* const buffer) -> Error override {
-        value_or(file, data_as<File>(data));
+    auto read(OpenInfo& info, const size_t offset, const size_t size, void* const buffer) -> Result<size_t> override {
+        value_or(file, data_as<File>(info.get_driver_data()));
         return file->read(offset, size, static_cast<uint8_t*>(buffer));
     }
 
-    auto write(const DriverData data, const size_t offset, const size_t size, const void* const buffer) -> Error override {
-        value_or(file, data_as<File>(data));
+    auto write(OpenInfo& info, const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> override {
+        value_or(file, data_as<File>(info.get_driver_data()));
         file->resize(offset + size);
         return file->write(offset, size, static_cast<const uint8_t*>(buffer));
     }
 
-    auto find(const DriverData data, const std::string_view name) -> Result<OpenInfo> override {
-        value_or(dir, data_as<Directory>(data));
+    auto find(OpenInfo& info, const std::string_view name) -> Result<OpenInfo> override {
+        value_or(dir, data_as<Directory>(info.get_driver_data()));
         const auto p = dir->find(name);
         return p != nullptr ? Result(create_openinfo(*p)) : Error::Code::NoSuchFile;
     }
 
-    auto create(const DriverData data, const std::string_view name, const FileType type) -> Result<OpenInfo> override {
-        value_or(dir, data_as<Directory>(data));
+    auto create(OpenInfo& info, const std::string_view name, const FileType type) -> Result<OpenInfo> override {
+        value_or(dir, data_as<Directory>(info.get_driver_data()));
         if(dir->find(name) != nullptr) {
             return Error::Code::FileExists;
         }
@@ -211,14 +213,14 @@ class Driver : public fs::Driver {
         return create_openinfo(*v);
     }
 
-    auto readdir(const DriverData data, const size_t index) -> Result<OpenInfo> override {
-        value_or(dir, data_as<Directory>(data));
+    auto readdir(OpenInfo& info, const size_t index) -> Result<OpenInfo> override {
+        value_or(dir, data_as<Directory>(info.get_driver_data()));
         value_or(child, dir->find_nth(index));
         return create_openinfo(*child);
     }
 
-    auto remove(const DriverData data, const std::string_view name) -> Error override {
-        value_or(dir, data_as<Directory>(data));
+    auto remove(OpenInfo& info, const std::string_view name) -> Error override {
+        value_or(dir, data_as<Directory>(info.get_driver_data()));
         if(!dir->remove(name)) {
             return Error::Code::NoSuchFile;
         }

@@ -1,6 +1,7 @@
 #pragma once
 #include <deque>
 
+#include "devfs/helper.hpp"
 #include "message.hpp"
 #include "task/manager.hpp"
 #include "usb/classdriver/mouse.hpp"
@@ -13,5 +14,4 @@ inline auto setup() -> void {
         task::kernel_task->send_message(m);
     };
 }
-
 } // namespace mouse

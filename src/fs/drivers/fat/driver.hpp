@@ -220,19 +220,21 @@ class Driver : public fs::Driver {
         return Error();
     }
 
-    auto read(const DriverData data, const size_t offset, size_t size, void* const buffer_) -> Error override {
-        if(data.type != FileType::Regular) {
+    auto read(OpenInfo& info, const size_t offset, size_t size, void* const buffer_) -> Result<size_t> override {
+        const auto total_size = size;
+
+        if(info.type != FileType::Regular) {
             return Error::Code::InvalidData;
         }
 
-        if(offset + size > data.size) {
+        if(offset + size > info.filesize) {
             return Error::Code::EndOfFile;
         }
 
         auto       op                = ClusterOperator(bpb, *block);
         auto       buffer            = static_cast<uint8_t*>(buffer_);
         const auto bytes_per_cluster = op.get_cluster_size_bytes();
-        auto       cluster           = static_cast<uint32_t>(data.num);
+        auto       cluster           = static_cast<uint32_t>(info.get_driver_data());
         if(!increment_fat(cluster, offset / bytes_per_cluster, bpb, *block)) {
             return Error::Code::EndOfFile;
         }
@@ -266,18 +268,18 @@ class Driver : public fs::Driver {
             memcpy(buffer, read_buffer.data(), size);
         }
 
-        return Error();
+        return size_t(total_size);
     }
 
-    auto write(const DriverData data, const size_t offset, const size_t size, const void* const buffer) -> Error override {
+    auto write(OpenInfo& info, const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> override {
         return Error::Code::NotImplemented;
     }
 
-    auto find(const DriverData data, const std::string_view name) -> Result<OpenInfo> override {
-        if(data.type != FileType::Directory) {
+    auto find(OpenInfo& info, const std::string_view name) -> Result<OpenInfo> override {
+        if(info.type != FileType::Directory) {
             return Error::Code::InvalidData;
         }
-        auto iterator = DirectoryIterator(static_cast<size_t>(data.num), bpb, *block);
+        auto iterator = DirectoryIterator(static_cast<size_t>(info.get_driver_data()), bpb, *block);
         while(true) {
             const auto dinfo_result = iterator.read();
             if(!dinfo_result) {
@@ -296,15 +298,15 @@ class Driver : public fs::Driver {
         return Error::Code::NoSuchFile;
     }
 
-    auto create(const DriverData data, const std::string_view name, const FileType type) -> Result<OpenInfo> override {
+    auto create(OpenInfo& info, const std::string_view name, const FileType type) -> Result<OpenInfo> override {
         return Error::Code::NotImplemented;
     }
 
-    auto readdir(const DriverData data, const size_t index) -> Result<OpenInfo> override {
-        if(data.type != FileType::Directory) {
+    auto readdir(OpenInfo& info, const size_t index) -> Result<OpenInfo> override {
+        if(info.type != FileType::Directory) {
             return Error::Code::InvalidData;
         }
-        auto iterator = DirectoryIterator(static_cast<size_t>(data.num), bpb, *block);
+        auto iterator = DirectoryIterator(static_cast<size_t>(info.get_driver_data()), bpb, *block);
         if(iterator.skip(index)) {
             return Error::Code::IndexOutOfRange;
         }
@@ -313,7 +315,7 @@ class Driver : public fs::Driver {
         return openinfo_from_dinfo(dinfo);
     }
 
-    auto remove(const DriverData data, const std::string_view name) -> Error override {
+    auto remove(OpenInfo& info, const std::string_view name) -> Error override {
         return Error::Code::NotImplemented;
     }
 

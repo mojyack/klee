@@ -45,6 +45,7 @@ class Handle {
   private:
     OpenInfo* data;
     OpenMode  mode;
+    Event     write_event; // data available
 
     auto is_write_opened() -> bool {
         if(mode != OpenMode::Write) {
@@ -55,11 +56,11 @@ class Handle {
     }
 
   public:
-    auto read(const size_t offset, const size_t size, void* const buffer) -> Error {
+    auto read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> {
         return data->read(offset, size, buffer);
     }
 
-    auto write(const size_t offset, const size_t size, const void* const buffer) -> Error {
+    auto write(const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> {
         if(!is_write_opened()) {
             return Error::Code::FileNotOpened;
         }
@@ -77,16 +78,14 @@ class Handle {
             if(!find_result) {
                 return find_result.as_error();
             }
-            result = &created_info.emplace(find_result.as_value());
+            result = &created_info.emplace(std::move(find_result.as_value()));
         }
 
-        if(const auto e = try_open(result, mode)) {
-            return e;
-        }
+        error_or(try_open(result, mode));
 
         if(created_info) {
             auto& v = created_info.value();
-            result  = &children.emplace(v.name, v).first->second;
+            result  = &children.emplace(v.name, std::move(v)).first->second;
         }
 
         return Handle(result, mode);
@@ -126,19 +125,38 @@ class Handle {
         return data->get_device_type();
     }
 
-    auto create_device(const std::string_view name, const DeviceType device_type, const uint64_t driver_impl) -> Result<OpenInfo> {
+    auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<OpenInfo> {
         if(!is_write_opened()) {
             return Error::Code::FileNotOpened;
         }
 
-        return data->create_device(name, device_type, driver_impl);
+        return data->create_device(name, device_impl);
     }
 
     auto control_device(const DeviceOperation op, void* const arg) -> Error {
         return data->control_device(op, arg);
     }
 
-    Handle(OpenInfo* const data, const OpenMode mode) : data(data), mode(mode) {}
+    auto operator=(Handle&& o) -> Handle& {
+        data        = o.data;
+        mode        = o.mode;
+        write_event = std::move(o.write_event);
+        return *this;
+    }
+
+    Handle(Handle&& o) {
+        *this = std::move(o);
+    }
+
+    Handle(OpenInfo* const data, const OpenMode mode) : data(data), mode(mode) {
+        data->on_handle_create(write_event);
+    }
+
+    ~Handle() {
+        if(write_event.is_valid()) {
+            data->on_handle_destroy();
+        }
+    }
 };
 
 class Controller {
@@ -189,9 +207,9 @@ class Controller {
         }
 
         for(const auto& d : dirname) {
-            auto handle = result.as_value();
+            auto handle = std::move(result.as_value());
             result      = handle.open(d, OpenMode::Read);
-            close(handle);
+            close(std::move(handle));
             if(!result) {
                 return result;
             }
@@ -210,7 +228,7 @@ class Controller {
         value_or(handle, open_parent_directory(elms, mode));
 
         auto result = handle.open(filename, mode);
-        close(handle);
+        close(std::move(handle));
         return result;
     }
 
@@ -247,9 +265,9 @@ class Controller {
         if(!open_result) {
             return open_result.as_error();
         }
-        const auto handle  = open_result.as_value();
+        auto handle        = std::move(open_result.as_value());
         handle.data->mount = volume_root;
-        mountpoints.emplace_back(handle);
+        mountpoints.emplace_back(std::move(handle));
         return Error();
     }
 
@@ -261,7 +279,7 @@ class Controller {
             mountpoint = node;
         } else {
             value_or(parent, open_parent_directory(elms, OpenMode::Read));
-            error_or(close(parent));
+            error_or(close(std::move(parent)));
             auto& children = parent.data->children;
             if(const auto p = children.find(std::string(elms.back())); p == children.end()) {
                 return Error::Code::NoSuchFile;
@@ -273,7 +291,7 @@ class Controller {
 
         for(auto m = mountpoints.begin(); m != mountpoints.end(); m += 1) {
             if(m->data != mountpoint) {
-                continue; 
+                continue;
             }
 
             const auto volume_root = mountpoint->mount;
@@ -282,7 +300,7 @@ class Controller {
             }
             mountpoint->mount = nullptr;
 
-            if(const auto e = close(*m)) {
+            if(const auto e = close(std::move(*m))) {
                 logger(LogLevel::Error, "failed to close mountpoint, this is kernel bug: %d\n", e.as_int());
                 mountpoints.erase(m);
                 return e;

@@ -5,11 +5,18 @@
 class Mutex {
   private:
     std::atomic_flag flag;
+    uint64_t         id = 0;
+
+    auto erase() -> void {
+        if(id != 0) {
+            task::task_manager->delete_event(id);
+        }
+    }
 
   public:
     auto aquire() -> void {
         while(flag.test_and_set()) {
-            task::task_manager->get_current_task().wait_address(this);
+            task::task_manager->get_current_task().wait_event(id);
         }
     }
 
@@ -22,15 +29,24 @@ class Mutex {
 
     auto release() -> void {
         flag.clear();
-        task::task_manager->notify_address(this);
+        task::task_manager->notify_event(id);
     }
 
-    Mutex() {
-        task::task_manager->add_wait_address(this);
+    auto operator=(Mutex&& o) -> Mutex& {
+        erase();
+        id   = o.id;
+        o.id = 0;
+        return *this;
     }
+
+    Mutex(Mutex&& o) {
+        *this = std::move(o);
+    }
+
+    Mutex() : id(task::task_manager->new_event()) {}
 
     ~Mutex() {
-        task::task_manager->erase_wait_address(this);
+        erase();
     }
 };
 
@@ -41,29 +57,50 @@ using Critical = SharedValue<Mutex, T>;
 
 class Event {
   private:
-    std::atomic_flag flag;
+    std::atomic_flag flag = true;
+    uint64_t         id   = 0;
+
+    auto erase() -> void {
+        if(id != 0) {
+            task::task_manager->delete_event(id);
+        }
+    }
 
   public:
     auto wait() -> void {
         while(!flag.test()) {
-            task::task_manager->get_current_task().wait_address(this);
+            task::task_manager->get_current_task().wait_event(id);
         }
     }
 
     auto notify() -> void {
-        flag.test_and_set();
-        task::task_manager->notify_address(this);
+        if(!flag.test_and_set()) {
+            task::task_manager->notify_event(id);
+        }
     }
 
     auto reset() -> void {
         flag.clear();
     }
 
-    Event() {
-        task::task_manager->add_wait_address(this);
+    auto is_valid() const -> bool {
+        return id != 0;
     }
 
+    auto operator=(Event&& o) -> Event& {
+        erase();
+        id   = o.id;
+        o.id = 0;
+        return *this;
+    }
+
+    Event(Event&& o) {
+        *this = std::move(o);
+    }
+
+    Event() : id(task::task_manager->new_event()) {}
+
     ~Event() {
-        task::task_manager->erase_wait_address(this);
+        erase();
     }
 };
