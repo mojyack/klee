@@ -28,7 +28,10 @@ class Framebuffer : public ::Framebuffer {
 
 inline auto fb = (Framebuffer*)(nullptr);
 
-template <std::integral T>
+template <class T>
+concept Number = std::integral<T> || std::is_pointer_v<T>;
+
+template <Number T>
 auto itos(const T value) -> std::array<char, sizeof(T) * 2 + 1> {
     auto r = std::array<char, sizeof(T) * 2 + 1>();
 
@@ -68,15 +71,19 @@ inline auto draw_string(const Point point, const std::string_view str) -> void {
 inline auto cursor = std::array<int, 2>{0, 0};
 
 template <class T>
-concept Printable = std::integral<T> || std::is_convertible_v<T, std::string_view>;
+concept Printable = Number<T> || std::is_convertible_v<T, std::string_view>;
 
 inline auto print(const std::string_view str) -> void {
     const auto font_size = get_font_size();
     draw_string(Point(cursor[0], cursor[1]), str.data());
-    cursor[1] += font_size[0] * str.size();
+    cursor[0] += font_size[0] * str.size();
 }
 
-template <std::integral T>
+inline auto print(const char* const str) -> void {
+    print(std::string_view(str));
+}
+
+template <Number T>
 inline auto print(T value) -> void {
     auto str = itos(value);
     print(std::string_view(str.data(), str.size()));
@@ -84,7 +91,11 @@ inline auto print(T value) -> void {
 
 template <Printable Arg, Printable... Args>
 inline auto print(Arg arg, Args... args) -> void {
-    print(arg);
+    if constexpr(std::is_convertible_v<Arg, std::string_view>) {
+        print(std::string_view(arg));
+    } else {
+        print(arg);
+    }
     if constexpr(sizeof...(args) >= 1) {
         print(args...);
     }
