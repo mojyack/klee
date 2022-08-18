@@ -44,7 +44,7 @@ __attribute__((no_caller_saved_registers)) inline auto try_kill_app(const Interr
     }
 
     back_to_system_stack();
-    auto& task = task::task_manager->get_current_task();
+    auto& task = task::manager->get_current_task();
     task.exit();
 }
 

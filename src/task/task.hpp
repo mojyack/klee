@@ -99,7 +99,7 @@ class Task {
     auto wakeup_may_fail() -> void; // used by interrupt
     auto wait_event(uint64_t event_id) -> void;
 
-    // for task_manager
+    // for manager
 
     auto get_system_stack_pointer() -> uint64_t& {
         return system_stack_pointer;

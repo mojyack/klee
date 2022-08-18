@@ -214,13 +214,13 @@ class Shell {
 
             auto task = (task::Task*)(nullptr);
             {
-                task = &task::task_manager->new_task();
+                task = &task::manager->new_task();
                 task->init_context(task::elf_startup, reinterpret_cast<uint64_t>(code_frames.get()));
                 [[maybe_unused]] const auto raw_ptr = code_frames.release();
                 task->wakeup();
             }
             close_handle(std::move(handle));
-            task::task_manager->wait_task(task);
+            task::manager->wait_task(task);
         } else {
             puts("unknown command");
         }
@@ -424,7 +424,7 @@ class Terminal : public StandardWindow {
 
     static auto main(const uint64_t id, const int64_t data) -> void {
         auto  app       = reinterpret_cast<Layer*>(data)->open_window<Terminal>(800, 600);
-        auto& this_task = task::task_manager->get_current_task();
+        auto& this_task = task::manager->get_current_task();
         auto  shell     = terminal::Shell([app](char c) { app->putc(c); }, [app](std::string_view s) { app->puts(s); });
         while(true) {
             const auto message = this_task.receive_message();

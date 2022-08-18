@@ -13,7 +13,7 @@ inline auto main(const uint64_t id, const int64_t data) -> void {
         keyboard_result = root.open(keyboard_path, fs::OpenMode::Read);
     }
     if(!keyboard_result) {
-        task::task_manager->get_current_task().exit();
+        task::manager->get_current_task().exit();
     }
 
     auto& keyboard_handle = keyboard_result.as_value();
@@ -25,6 +25,6 @@ inline auto main(const uint64_t id, const int64_t data) -> void {
     }
     printk("terminal exit\n");
 
-    task::task_manager->get_current_task().exit();
+    task::manager->get_current_task().exit();
 }
 }

@@ -76,7 +76,7 @@ class Kernel {
         // create task manager
         // mutex needs this
         auto tm            = task::TaskManager();
-        task::task_manager = &tm;
+        task::manager = &tm;
 
         // create debug output
         // TODO
@@ -143,7 +143,7 @@ class Kernel {
         // task switching timer
         timer_manager.add_timer({5, 0, timer::Flags::Periodic | timer::Flags::Task});
 
-        task::kernel_task = &task::task_manager->get_current_task();
+        task::kernel_task = &task::manager->get_current_task();
 
         // scan pci devices
         auto       pci              = pci::Devices();
@@ -233,18 +233,18 @@ class Kernel {
             sata_controller = ahci::initialize(*ahci_dev);
         }
 
-        auto& disk_finder = task::task_manager->new_task();
+        auto& disk_finder = task::manager->new_task();
         disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(&sata_controller.value()));
         disk_finder.wakeup(1);
 
         // open terminal
         //{
-        auto& guiterm = task::task_manager->new_task();
+        auto& guiterm = task::manager->new_task();
         guiterm.init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
         guiterm.wakeup();
         //}
         
-        auto& term = task::task_manager->new_task();
+        auto& term = task::manager->new_task();
         term.init_context(terminal::main, 0);
         term.wakeup();
 
@@ -368,7 +368,7 @@ extern "C" auto int_handler_lapic_timer(task::TaskContext& context) -> void {
     notify_end_of_interrupt();
 
     if(task_switch) {
-        task::task_manager->switch_task_may_fail(context);
+        task::manager->switch_task_may_fail(context);
     }
 }
 } // namespace interrupt::internal

@@ -19,7 +19,7 @@ inline auto syscall_printk(const uint64_t arg0, const uint64_t arg1, const uint6
 }
 
 inline auto syscall_exit(const uint64_t arg0, const uint64_t arg1, const uint64_t arg2, const uint64_t arg3, const uint64_t arg4, const uint64_t arg5) -> Result {
-    auto& task = task::task_manager->get_current_task();
+    auto& task = task::manager->get_current_task();
     task.exit();
     return {0, 0};
 }

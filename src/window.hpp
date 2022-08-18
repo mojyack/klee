@@ -174,7 +174,7 @@ class Window {
     Window()                                   = default;
     Window(const int width, const int height) : size{width, height},
                                                 buffer(width * height),
-                                                task(&task::task_manager->get_current_task()) {}
+                                                task(&task::manager->get_current_task()) {}
 
     virtual ~Window() = default;
 };

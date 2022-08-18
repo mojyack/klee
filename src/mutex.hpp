@@ -9,14 +9,14 @@ class Mutex {
 
     auto erase() -> void {
         if(id != 0) {
-            task::task_manager->delete_event(id);
+            task::manager->delete_event(id);
         }
     }
 
   public:
     auto aquire() -> void {
         while(flag.test_and_set()) {
-            task::task_manager->get_current_task().wait_event(id);
+            task::manager->get_current_task().wait_event(id);
         }
     }
 
@@ -29,7 +29,7 @@ class Mutex {
 
     auto release() -> void {
         flag.clear();
-        task::task_manager->notify_event(id);
+        task::manager->notify_event(id);
     }
 
     auto operator=(Mutex&& o) -> Mutex& {
@@ -43,7 +43,7 @@ class Mutex {
         *this = std::move(o);
     }
 
-    Mutex() : id(task::task_manager->new_event()) {}
+    Mutex() : id(task::manager->new_event()) {}
 
     ~Mutex() {
         erase();
@@ -62,20 +62,20 @@ class Event {
 
     auto erase() -> void {
         if(id != 0) {
-            task::task_manager->delete_event(id);
+            task::manager->delete_event(id);
         }
     }
 
   public:
     auto wait() -> void {
         while(!flag.test()) {
-            task::task_manager->get_current_task().wait_event(id);
+            task::manager->get_current_task().wait_event(id);
         }
     }
 
     auto notify() -> void {
         if(!flag.test_and_set()) {
-            task::task_manager->notify_event(id);
+            task::manager->notify_event(id);
         }
     }
 
@@ -98,7 +98,7 @@ class Event {
         *this = std::move(o);
     }
 
-    Event() : id(task::task_manager->new_event()) {}
+    Event() : id(task::manager->new_event()) {}
 
     ~Event() {
         erase();

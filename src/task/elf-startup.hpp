@@ -6,7 +6,7 @@
 
 namespace task {
 inline auto elf_startup(const uint64_t id, const int64_t data) -> void {
-    auto& task = task::task_manager->get_current_task();
+    auto& task = task::manager->get_current_task();
 
     // load image
     auto  image    = std::unique_ptr<SmartFrameID>(reinterpret_cast<SmartFrameID*>(data));

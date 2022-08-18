@@ -163,7 +163,7 @@ global jump_to_app
 jump_to_app:  ; void jump_to_app(uint64_t id, int64_t data, uint16_t ss(rdx), uint64_t rip(rcx), uint64_t rsp(r8), uint64_t* system_stack_ptr(r9));
     mov [r9], rsp ; save system stack pointer
 
-    ; self_task_system_stack is automatically updated by the task_manager on context switch,
+    ; self_task_system_stack is automatically updated by the task::manager on context switch,
     ; but set here so that the system call can be called before it is ever context switched
     mov [self_task_system_stack], rsp
 

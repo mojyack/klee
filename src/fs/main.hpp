@@ -222,6 +222,6 @@ inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
         man.set_sata_devices(std::move(sata_devices));
     }
 
-    task::task_manager->get_current_task().exit();
+    task::manager->get_current_task().exit();
 }
 } // namespace fs

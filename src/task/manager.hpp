@@ -381,28 +381,28 @@ class TaskManager {
     }
 };
 
-inline auto task_manager = (TaskManager*)(nullptr);
+inline auto manager = (TaskManager*)(nullptr);
 
 inline auto Task::exit() -> void {
-    task_manager->exit_task(this);
+    manager->exit_task(this);
 }
 
 inline auto Task::sleep() -> Task& {
-    task_manager->sleep(this);
+    manager->sleep(this);
     return *this;
 }
 
 inline auto Task::wakeup(const int nice) -> Task& {
-    task_manager->wakeup(this, nice);
+    manager->wakeup(this, nice);
     return *this;
 }
 
 inline auto Task::wakeup_may_fail() -> void {
-    task_manager->wakeup_may_fail(this);
+    manager->wakeup_may_fail(this);
 }
 
 inline auto Task::wait_event(const uint64_t event_id) -> void {
-    task_manager->wait_event(event_id, this);
+    manager->wait_event(event_id, this);
 }
 
 inline auto kernel_task = (Task*)(nullptr);
