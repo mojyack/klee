@@ -1,50 +1,26 @@
-#include <array>
-#include <cstdio>
-
 #include "acpi.hpp"
 #include "ahci/ahci.hpp"
-#include "apps/counter.hpp"
-#include "apps/terminal.hpp"
-#include "apps/wallpaper.hpp"
-#include "asmcode.h"
 #include "debug.hpp"
 #include "devfs/framebuffer.hpp"
 #include "fs/main.hpp"
 #include "interrupt/interrupt.hpp"
 #include "keyboard.hpp"
-#include "log.hpp"
-#include "memory-manager.hpp"
 #include "memory-map.h"
 #include "mouse.hpp"
-#include "mousecursor.hpp"
 #include "paging.hpp"
-#include "pci.hpp"
-#include "print.hpp"
 #include "segment.hpp"
 #include "syscall.hpp"
 #include "terminal.hpp"
 #include "timer.hpp"
-#include "uefi/gop-framebuffer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
-#include "window-manager.hpp"
 
 class Kernel {
   private:
     BitmapMemoryManager memory_manager;
     FramebufferConfig   framebuffer_config;
     acpi::RSDP&         rsdp;
-    MouseCursor*        mousecursor;
-    WindowManager*      window_manager;
-
-    Window* focused_window         = nullptr;
-    bool    focused_window_grubbed = false;
-
-    // mouse click
-    Point prev_mouse_pos = {0, 0};
-    bool  left_pressed   = false;
-    bool  right_pressed  = false;
 
     static auto switch_ehci_to_xhci(const pci::Devices& pci, const pci::Device& xhc_dev) -> void {
         auto intel_ehc_exist       = false;
@@ -102,18 +78,6 @@ class Kernel {
             return;
         }
 
-        // set global objects
-
-        const auto fb = std::unique_ptr<Framebuffer>(new uefi::Framebuffer(framebuffer_config));
-        framebuffer   = fb.get();
-
-        const auto wm                = std::unique_ptr<WindowManager>(new WindowManager());
-        window_manager               = wm.get();
-        const auto background_layer  = window_manager->create_layer();
-        const auto application_layer = window_manager->create_layer();
-        const auto mousecursor_layer = window_manager->create_layer();
-        const auto fb_size           = framebuffer->get_size();
-
         // initialize tss
         if(const auto e = segment::setup_tss()) {
             logger(LogLevel::Error, "failed to setup tss\n");
@@ -133,12 +97,6 @@ class Kernel {
 
         // initialize idt
         interrupt::initialize(timer_manager);
-
-        // create background
-        const auto background = window_manager->get_layer(background_layer).open_window<WallpaperApp>(fb_size[0], fb_size[1]);
-
-        // create mouse cursor
-        mousecursor = window_manager->get_layer(mousecursor_layer).open_window<MouseCursor>();
 
         // task switching timer
         timer_manager.add_timer({5, 0, timer::Flags::Periodic | timer::Flags::Task});
@@ -237,19 +195,10 @@ class Kernel {
         disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(&sata_controller.value()));
         disk_finder.wakeup(1);
 
-        // auto& guiterm = task::manager->new_task();
-        // guiterm.init_context(GUITerminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
-        // guiterm.wakeup();
-
         auto term_arg = terminal::TerminalMainArg{"/dev/fb-uefi0", nullptr};
         auto term     = &task::manager->new_task();
         term->init_context(terminal::main, reinterpret_cast<int64_t>(&term_arg));
         term->wakeup();
-
-        // refresh();
-
-        auto refresh_screen_done = true;
-        auto refresh_pending     = false;
 
         auto virtio_gpu_framebuffer = std::unique_ptr<virtio::gpu::Framebuffer>();
 
@@ -279,58 +228,6 @@ class Kernel {
             break;
         case MessageType::Timer:
             break;
-        case MessageType::Keyboard: {
-            if(focused_window != nullptr) {
-                focused_window->get_task().send_message(*message);
-            }
-        } break;
-        case MessageType::Mouse: {
-            const auto& data = message->data.mouse;
-            mousecursor->move_position(Point(data.displacement_x, data.displacement_y));
-            if(focused_window != nullptr && focused_window_grubbed) {
-                focused_window->move_position(mousecursor->get_position() - prev_mouse_pos);
-            }
-
-            const auto left  = data.buttons & 0x01;
-            const auto right = data.buttons & 0x02;
-
-            prev_mouse_pos = mousecursor->get_position();
-            if(!left_pressed & left) {
-                auto&      a           = window_manager->get_layer(application_layer);
-                const auto f           = a.try_focus(mousecursor->get_position());
-                focused_window         = f != nullptr ? f : focused_window;
-                const auto g           = a.try_grub(mousecursor->get_position());
-                focused_window_grubbed = focused_window == g;
-                if(focused_window != nullptr) {
-                    a.focus(focused_window);
-                }
-            } else if(left_pressed & !left) {
-                focused_window_grubbed = false;
-            }
-            left_pressed  = left;
-            right_pressed = right;
-            refresh();
-        } break;
-        case MessageType::RefreshScreen:
-            if(!refresh_screen_done) {
-                refresh_pending = true;
-                break;
-            }
-            refresh_screen_done = false;
-            refresh_pending     = false;
-        //    window_manager->refresh(focused_window);
-        //    framebuffer->swap();
-            break;
-        case MessageType::RefreshScreenDone:
-            refresh_screen_done = true;
-            if(refresh_pending) {
-                refresh();
-            }
-            break;
-        case MessageType::ScreenResized: {
-            const auto [w, h] = framebuffer->get_size();
-            background->resize_window(w, h);
-        } break;
         case MessageType::VirtIOGPUNewDevice: {
             virtio_gpu_framebuffer = virtio_gpu_device->create_devfs_framebuffer();
             if(const auto e = devfs::create_device_file("fb-virtio0", reinterpret_cast<uintptr_t>(virtio_gpu_framebuffer.get()))) {

@@ -2,28 +2,73 @@
 #include <string_view>
 
 #include "font.hpp"
-#include "framebuffer.hpp"
+#include "type.hpp"
 #include "uefi/framebuffer.h"
 
 namespace debug {
-class Framebuffer : public ::Framebuffer {
+class Framebuffer {
   private:
     FramebufferConfig config;
 
-    auto find_pointer(const Point point, const bool flip) -> uint8_t* override {
+    auto find_pointer(const Point point) -> uint8_t* {
         return config.frame_buffer + (point.y * config.pixels_per_scan_line + point.x) * 4;
     }
 
-    auto do_swap(const bool flip) -> bool override {
-        return true;
-    }
-
   public:
-    auto get_size() const -> std::array<size_t, 2> override {
+    auto get_size() const -> std::array<size_t, 2> {
         return {config.horizontal_resolution, config.vertical_resolution};
     }
 
+    auto write_pixel(const Point point, const RGBColor color) -> void {
+        write_pixel(point, color.pack());
+    }
+
+    auto write_pixel(const Point point, const uint32_t color) -> void {
+        const auto p                    = find_pointer(point);
+        *reinterpret_cast<uint32_t*>(p) = color;
+    }
+
+    auto write_pixel(const Point point, const uint8_t color) -> void {
+        const auto c = uint32_t(color);
+        write_pixel(point, c | c << 8 | c << 16);
+    }
+
+    auto write_rect(const Point a, const Point b, const RGBColor color) -> void {
+        write_rect(a, b, color.pack());
+    }
+
+    auto write_rect(const Point a, const Point b, const uint32_t color) -> void {
+        const auto c = uint64_t(color) | uint64_t(color) << 32;
+        for(auto y = a.y; y < b.y; y += 1) {
+            for(auto x = a.x; x + 1 < b.x; x += 2) {
+                auto p = reinterpret_cast<uint64_t*>(find_pointer({x, y}));
+                *p     = c;
+            }
+        }
+        if((b.x - a.x) % 2 != 0) {
+            for(auto y = a.y; y < b.y; y += 1) {
+                auto p = reinterpret_cast<uint64_t*>(find_pointer({1, y}));
+                *p     = c;
+            }
+        }
+    }
+
+    auto write_rect(const Point a, const Point b, const uint8_t color) -> void {
+        const auto c = uint32_t(color);
+        write_rect(a, b, c | c << 8 | c << 16);
+    }
+
+    auto read_pixel(const Point point) -> uint32_t {
+        return *reinterpret_cast<uint32_t*>(find_pointer(point));
+    }
+
+    auto copy_array(const uint32_t* const source, const Point dest, const size_t len) -> void {
+        memcpy(find_pointer(dest), source, len * 4);
+    }
+
     Framebuffer(const FramebufferConfig& config) : config(config) {}
+
+    virtual ~Framebuffer() {}
 };
 
 inline auto fb = (Framebuffer*)(nullptr);

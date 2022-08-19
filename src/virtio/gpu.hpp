@@ -1,7 +1,6 @@
 #pragma once
 #include <algorithm>
 
-#include "../framebuffer.hpp"
 #include "../fs/drivers/dev.hpp"
 #include "../interrupt/vector.hpp"
 #include "../log.hpp"
@@ -180,43 +179,6 @@ auto queue_data(queue::Queue& queue, ControlHeader&& header, Payload&& payload) 
 }
 } // namespace internal
 
-class LegacyFramebuffer : public ::Framebuffer {
-  private:
-    std::array<FrameID, 2>  buffers;
-    std::array<uint32_t, 2> display_size;
-    queue::Queue*           control_queue;
-    uint32_t*               sync_done;
-
-    auto find_pointer(const Point point, const bool flip) -> uint8_t* override {
-        const auto base = static_cast<uint8_t*>(buffers[flip].get_frame());
-        return base + (point.y * display_size[0] + point.x) * 4;
-    }
-
-    auto do_swap(const bool flip) -> bool override {
-        if(*sync_done == 0) {
-            return false;
-        }
-        *sync_done = 0;
-
-        const auto resource_id = uint32_t(!flip ? 1 : 2);
-        internal::queue_data<internal::TransferToHost2DRequest>(*control_queue, {internal::Control::TransferToHost2D, 0, 0, 0}, {{0, 0, display_size[0], display_size[1]}, 0, resource_id, 0});
-        internal::queue_data<internal::ResourceFlushRequest>(*control_queue, {internal::Control::ResourceFlush, 0, 0, 0}, {{0, 0, display_size[0], display_size[1]}, resource_id, 0});
-        internal::queue_data<internal::SetScanoutRequest>(*control_queue, {internal::Control::SetScanout, internal::ControlHeader::flag_fence, 1, 0}, {{0, 0, display_size[0], display_size[1]}, 0, resource_id});
-        control_queue->notify_device();
-        return true;
-    }
-
-  public:
-    auto get_size() const -> std::array<size_t, 2> override {
-        return {display_size[0], display_size[1]};
-    }
-
-    LegacyFramebuffer(const std::array<FrameID, 2> buffers, const std::array<uint32_t, 2> display_size, queue::Queue& control_queue, uint32_t* const sync_done) : buffers(buffers),
-                                                                                                                                                                  display_size(display_size),
-                                                                                                                                                                  control_queue(&control_queue),
-                                                                                                                                                                  sync_done(sync_done){};
-};
-
 class Framebuffer : public fs::dev::FramebufferDevice {
   private:
     std::array<FrameID, 2> buffers;
@@ -276,7 +238,6 @@ class GPUDevice {
 
     std::array<uint32_t, 2>                          display_size = {1024, 768};
     std::pair<std::array<SmartFrameID, 2>, uint64_t> framebuffer;
-    std::optional<LegacyFramebuffer>                 virtio_framebuffer;
     uint32_t                                         sync_done       = 1;
     Event**                                          sync_done_event = nullptr;
 
@@ -368,12 +329,6 @@ class GPUDevice {
                     break;
                 }
                 task::kernel_task->send_message(MessageType::VirtIOGPUNewDevice);
-                virtio_framebuffer.emplace(std::array{*framebuffer.first[0], *framebuffer.first[1]}, display_size, control_queue, &sync_done);
-                auto [w, h]   = ::framebuffer->get_size();
-                ::framebuffer = &virtio_framebuffer.value();
-                if(w != display_size[0] || h != display_size[1]) {
-                    task::kernel_task->send_message(MessageType::ScreenResized);
-                }
             } break;
             case internal::Control::SetScanout:
             case internal::Control::TransferToHost2D:
@@ -389,7 +344,6 @@ class GPUDevice {
             }
             if(response->flags & internal::ControlHeader::flag_fence) {
                 sync_done = 1;
-                task::kernel_task->send_message(MessageType::RefreshScreenDone);
                 if(sync_done_event != nullptr && *sync_done_event != nullptr) {
                     (*sync_done_event)->notify();
                 }
