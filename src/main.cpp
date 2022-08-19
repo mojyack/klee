@@ -237,13 +237,6 @@ class Kernel {
         disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(&sata_controller.value()));
         disk_finder.wakeup(1);
 
-        // open terminal
-        //{
-        auto& guiterm = task::manager->new_task();
-        guiterm.init_context(Terminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
-        guiterm.wakeup();
-        //}
-        
         auto& term = task::manager->new_task();
         term.init_context(terminal::main, 0);
         term.wakeup();

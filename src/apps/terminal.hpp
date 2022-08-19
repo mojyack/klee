@@ -8,7 +8,7 @@
 
 #include "../debug.hpp"
 
-namespace terminal {
+namespace guiterminal {
 static auto split(const std::string_view str) -> std::vector<std::string_view> {
     auto       result = std::vector<std::string_view>();
     const auto len    = str.size();
@@ -257,7 +257,7 @@ class Shell {
 #undef handle_or
 } // namespace terminal
 
-class Terminal : public StandardWindow {
+class GUITerminal : public StandardWindow {
   private:
     struct Line {
         std::vector<char> data;
@@ -417,15 +417,15 @@ class Terminal : public StandardWindow {
         }
     }
 
-    Terminal(const int width, const int height) : StandardWindow(width, height, "terminal"),
+    GUITerminal(const int width, const int height) : StandardWindow(width, height, "terminal"),
                                                   font_size(::get_font_size()) {
         resize(height / font_size[1], width / font_size[0]);
     }
 
     static auto main(const uint64_t id, const int64_t data) -> void {
-        auto  app       = reinterpret_cast<Layer*>(data)->open_window<Terminal>(800, 600);
+        auto  app       = reinterpret_cast<Layer*>(data)->open_window<GUITerminal>(800, 600);
         auto& this_task = task::manager->get_current_task();
-        auto  shell     = terminal::Shell([app](char c) { app->putc(c); }, [app](std::string_view s) { app->puts(s); });
+        auto  shell     = guiterminal::Shell([app](char c) { app->putc(c); }, [app](std::string_view s) { app->puts(s); });
         while(true) {
             const auto message = this_task.receive_message();
             if(!message) {
