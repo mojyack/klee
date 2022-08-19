@@ -19,6 +19,7 @@ class FramebufferDevice : public Device {
   protected:
     uint8_t*              data;
     std::array<size_t, 2> buffer_size;
+    Event*                write_event;
 
   public:
     auto read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> override {
@@ -41,8 +42,20 @@ class FramebufferDevice : public Device {
         return DeviceType::Framebuffer;
     }
 
+    auto on_handle_create(Event& write_event) -> void override {
+        this->write_event = &write_event;
+    }
+
+    auto on_handle_destroy() -> void override {
+        this->write_event = nullptr;
+    }
+
     auto get_size() -> std::array<size_t, 2> {
         return buffer_size;
+    }
+
+    auto direct_access() -> uint8_t** {
+        return &data;
     }
 
     virtual auto swap() -> void = 0;
@@ -114,7 +127,6 @@ class KeyboardDevice : public Device {
     auto on_handle_create(Event& write_event) -> void override {
         active            = true;
         this->write_event = &write_event;
-        this->write_event->reset();
     }
 
     auto on_handle_destroy() -> void override {
@@ -154,7 +166,7 @@ class Driver : public fs::Driver {
         }
 
         if(const auto p = devices.find(std::string(name)); p != devices.end()) {
-            return OpenInfo(p->first, *this, p->second.get(), FileType::Device, 0);
+            return OpenInfo(p->first, *this, p->second.get(), FileType::Device, 0, false, true);
         } else {
             return Error::Code::NoSuchFile;
         }
@@ -173,7 +185,7 @@ class Driver : public fs::Driver {
         }
 
         const auto p = std::next(devices.begin(), index);
-        return OpenInfo(p->first, *this, p->second.get(), FileType::Device, 0);
+        return OpenInfo(p->first, *this, p->second.get(), FileType::Device, 0, false, true);
     }
 
     auto remove(OpenInfo& info, const std::string_view name) -> Error override {
@@ -222,6 +234,9 @@ class Driver : public fs::Driver {
             switch(op) {
             case DeviceOperation::GetSize: {
                 *reinterpret_cast<std::array<size_t, 2>*>(arg) = fb.get_size();
+            } break;
+            case DeviceOperation::GetDirectPointer: {
+                *reinterpret_cast<uint8_t***>(arg) = fb.direct_access();
             } break;
             case DeviceOperation::Swap: {
                 fb.swap();

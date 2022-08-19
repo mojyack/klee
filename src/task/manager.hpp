@@ -155,6 +155,14 @@ class TaskManager {
         sleep(task);
     }
 
+    // this functions unlocks lock
+    auto wait_events(const std::vector<uint64_t> event_ids, ManagedTask* const task) -> void {
+        for(const auto id : event_ids) {
+            events[id].emplace_back(task);
+        }
+        sleep(task);
+    }
+
     auto notify_event_locked(const uint64_t event_id) -> void {
         const auto p = events.find(event_id);
         if(p != events.end()) {
@@ -280,7 +288,6 @@ class TaskManager {
         switch_context(&next_task->get_context(), &current_task->get_context());
     }
 
-
     // called by timer interrupt
     auto switch_task_may_fail(TaskContext& context) -> void {
         if(!try_aquire_lock()) {
@@ -360,6 +367,11 @@ class TaskManager {
         wait_event(event_id, container_of(task, &ManagedTask::task));
     }
 
+    auto wait_events(std::vector<uint64_t> event_ids, Task* const task) -> void {
+        aquire_lock();
+        wait_events(std::move(event_ids), container_of(task, &ManagedTask::task));
+    }
+
     auto notify_event(const uint64_t event_id) -> void {
         aquire_lock();
         notify_event_locked(event_id);
@@ -403,6 +415,10 @@ inline auto Task::wakeup_may_fail() -> void {
 
 inline auto Task::wait_event(const uint64_t event_id) -> void {
     manager->wait_event(event_id, this);
+}
+
+inline auto Task::wait_events(std::vector<uint64_t> event_ids) -> void {
+    manager->wait_events(std::move(event_ids), this);
 }
 
 inline auto kernel_task = (Task*)(nullptr);

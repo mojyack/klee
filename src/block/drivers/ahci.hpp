@@ -16,7 +16,6 @@ class Device : public BlockDevice {
 
     auto read_sector(const size_t sector, const size_t count, void* const buffer) -> Error override {
         auto event = Event();
-        event.reset();
         if(!device->read(sector, count, static_cast<uint8_t*>(buffer), /*hack*/ count * bytes_per_sector, event)) {
             return Error::Code::IOError;
         }
@@ -26,7 +25,6 @@ class Device : public BlockDevice {
 
     auto write_sector(size_t sector, size_t count, const void* const buffer) -> Error override {
         auto event = Event();
-        event.reset();
         if(!device->write(sector, count, static_cast<const uint8_t*>(buffer), /*hack*/ count * bytes_per_sector, event)) {
             return Error::Code::IOError;
         }

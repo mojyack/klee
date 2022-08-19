@@ -4,16 +4,17 @@
 namespace devfs {
 class GOPFrameBuffer : public fs::dev::FramebufferDevice {
   private:
-    FramebufferConfig    config;
+    uint8_t*             gop_framebuffer;
     std::vector<uint8_t> backbuffer;
 
   public:
     auto swap() -> void override {
-        memcpy(config.frame_buffer, backbuffer.data(), backbuffer.size());
-        task::kernel_task->send_message(MessageType::RefreshScreenDone);
+        memcpy(gop_framebuffer, backbuffer.data(), backbuffer.size());
+        write_event->notify();
     }
 
-    GOPFrameBuffer(const FramebufferConfig& config) {
+    GOPFrameBuffer(const FramebufferConfig& config) : gop_framebuffer(config.frame_buffer),
+                                                      backbuffer(config.horizontal_resolution * config.vertical_resolution * 4) {
         data        = backbuffer.data();
         buffer_size = {config.horizontal_resolution, config.vertical_resolution};
     }

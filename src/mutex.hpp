@@ -57,8 +57,8 @@ using Critical = SharedValue<Mutex, T>;
 
 class Event {
   private:
-    std::atomic_flag flag = true;
-    uint64_t         id   = 0;
+    std::atomic_flag flag;
+    uint64_t         id = 0;
 
     auto erase() -> void {
         if(id != 0) {
@@ -85,6 +85,14 @@ class Event {
 
     auto is_valid() const -> bool {
         return id != 0;
+    }
+
+    auto test() const -> bool {
+        return flag.test();
+    }
+
+    auto read_id() const -> uint64_t {
+        return id;
     }
 
     auto operator=(Event&& o) -> Event& {

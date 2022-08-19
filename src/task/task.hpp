@@ -97,7 +97,10 @@ class Task {
     auto sleep() -> Task&;
     auto wakeup(int nice = -1) -> Task&;
     auto wakeup_may_fail() -> void; // used by interrupt
+
     auto wait_event(uint64_t event_id) -> void;
+
+    auto wait_events(std::vector<uint64_t> event_ids) -> void;
 
     // for manager
 

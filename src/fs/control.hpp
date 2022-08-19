@@ -26,6 +26,11 @@ inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
         return Error::Code::FileOpened;
     }
 
+    // cannot open exclusive file
+    if(info->is_exclusive() && (info->read_count >= 1 || info->write_count >= 1)) {
+        return Error::Code::FileOpened;
+    }
+
     switch(mode) {
     case OpenMode::Read:
         info->read_count += 1;
@@ -137,10 +142,15 @@ class Handle {
         return data->control_device(op, arg);
     }
 
+    auto read_event() -> Event& {
+        return write_event;
+    }
+
     auto operator=(Handle&& o) -> Handle& {
         data        = o.data;
         mode        = o.mode;
         write_event = std::move(o.write_event);
+        data->on_handle_create(write_event);
         return *this;
     }
 
