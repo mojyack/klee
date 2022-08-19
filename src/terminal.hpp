@@ -16,7 +16,6 @@
 
 #define exit_or(exp)                              \
     if(exp) {                                     \
-        printk("terminal errror %d", exp.as_int()); \
         task::manager->get_current_task().exit(); \
     }
 
@@ -142,9 +141,7 @@ inline auto main(const uint64_t id, const int64_t data) -> void {
     while(true) {
         switch(event_waiter.wait()) {
         case 0: {
-            if(!keyboard.read(0, sizeof(fs::dev::KeyboardPacket), &buf)) {
-                printk("read error %d\n");
-            }
+            exit_or(!keyboard.read(0, sizeof(fs::dev::KeyboardPacket), &buf));
             auto       str = std::array<char, 32>();
             const auto len = snprintf(str.data(), str.size(), "[%c] %02X %02X", buf.ascii, buf.keycode, buf.modifier);
             printk({str.data(), size_t(len)});
