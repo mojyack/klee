@@ -10,6 +10,7 @@ enum class MessageType {
     RefreshScreen,
     RefreshScreenDone,
     ScreenResized,
+    VirtIOGPUNewDevice,
     VirtIOGPUControl,
     VirtIOGPUCursor,
 };

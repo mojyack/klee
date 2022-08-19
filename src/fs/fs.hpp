@@ -28,6 +28,7 @@ enum class DeviceOperation {
     GetSize,
     GetDirectPointer,
     Swap,
+    IsDoubleBuffered,
 };
 
 class Driver;

@@ -5,7 +5,7 @@
 namespace terminal {
 class FramebufferWriter {
   private:
-    uint8_t*&             data;
+    uint8_t*             data;
     std::array<size_t, 2> size;
 
     auto find_pointer(const Point point) -> uint8_t* {
@@ -69,7 +69,7 @@ class FramebufferWriter {
         }
     }
 
-    FramebufferWriter(uint8_t*& data, const std::array<size_t, 2> size) : data(data), size(size) {}
+    FramebufferWriter(uint8_t* const data, const std::array<size_t, 2> size) : data(data), size(size) {}
 };
 
 class Terminal {
@@ -241,7 +241,7 @@ class EventsWaiter {
     }                                                               \
     if(!handle_result) {                                            \
         print("open error: %d", handle_result.as_error().as_int()); \
-        return;                                                     \
+        return true;                                                \
     }                                                               \
     auto& handle = handle_result.as_value();
 
@@ -309,15 +309,17 @@ class Shell {
         return root.close(std::move(handle));
     }
 
-    auto interpret(const std::string_view arg) -> void {
+    auto interpret(const std::string_view arg) -> bool {
         const auto argv = split(arg);
         if(argv.size() == 0) {
-            return;
+            return true;
         }
         if(argv[0] == "echo") {
             for(auto a = argv.begin() + 1; a != argv.end(); a += 1) {
                 puts(*a);
             }
+        } else if(argv[0] == "exit") {
+            return false;
         } else if(argv[0] == "dmesg") {
             for(auto i = 0; i < printk_buffer.len; i += 1) {
                 putc(printk_buffer.buffer[(i + printk_buffer.head) % printk_buffer.buffer.size()]);
@@ -340,7 +342,7 @@ class Shell {
                 }
                 if(mounts.empty()) {
                     puts("(no mounts)");
-                    return;
+                    return true;
                 }
                 for(const auto& m : mounts) {
                     print("%s on \"%s\"\n", fs::mdev_to_str(m.device).data(), m.path.data());
@@ -361,7 +363,7 @@ class Shell {
         } else if(argv[0] == "umount") {
             if(argv.size() != 2) {
                 puts("usage: umount MOUNTPOINT");
-                return;
+                return true;
             }
             auto e = Error();
             {
@@ -394,7 +396,7 @@ class Shell {
         } else if(argv[0] == "cat") {
             if(argv.size() != 2) {
                 puts("usage: cat FILE");
-                return;
+                return true;
             }
             handle_or(argv[1]);
             for(auto i = size_t(0); i < handle.get_filesize(); i += 1) {
@@ -402,7 +404,7 @@ class Shell {
                 if(const auto read = handle.read(i, 1, &c); !read) {
                     print("read error: %d\n", read.as_error().as_int());
                     close_handle(std::move(handle));
-                    return;
+                    return true;
                 }
                 if(c >= 0x20) {
                     putc(c);
@@ -425,7 +427,7 @@ class Shell {
         } else if(argv[0] == "run") {
             if(argv.size() != 2) {
                 puts("usage: run FILE");
-                return;
+                return true;
             }
             handle_or(argv[1]);
             const auto num_frames         = (handle.get_filesize() + bytes_per_frame - 1) / bytes_per_frame;
@@ -433,13 +435,13 @@ class Shell {
             if(!code_frames_result) {
                 print("failed to allocate frames for code: %d\n", code_frames_result.as_error());
                 close_handle(std::move(handle));
-                return;
+                return true;
             }
             auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(code_frames_result.as_value(), num_frames));
             if(const auto read = handle.read(0, handle.get_filesize(), (*code_frames)->get_frame()); !read) {
                 print("file read error: %d\n", read.as_error().as_int());
                 close_handle(std::move(handle));
-                return;
+                return true;
             }
 
             auto task = (task::Task*)(nullptr);
@@ -454,14 +456,17 @@ class Shell {
         } else {
             puts("unknown command");
         }
+        return true;
     }
 
   public:
-    auto input(const char c) -> void {
+    auto input(const char c) -> bool {
         switch(c) {
         case 0x0a:
             putc(c);
-            interpret(line_buffer);
+            if(!interpret(line_buffer)) {
+                return false;
+            }
             putc('\n');
             puts(prompt);
             line_buffer.clear();
@@ -477,6 +482,7 @@ class Shell {
             putc(c);
             break;
         }
+        return true;
     }
 
     Shell(Terminal& term) : term(term) {
@@ -499,75 +505,118 @@ class Shell {
     }                                                               \
     auto& var = var##_result.as_value();
 
-#define exit_or(exp)                              \
-    if(exp) {                                     \
-        task::manager->get_current_task().exit(); \
+#define return_or(exp) \
+    if(exp) {          \
+        return;        \
     }
 
 struct ShellMainArg {
     Shell&      shell;
     fs::Handle& keyboard;
+    Event&      exit;
 };
 
 inline auto shell_main(const uint64_t id, const int64_t data) -> void {
     auto& arg      = *reinterpret_cast<ShellMainArg*>(data);
     auto& shell    = arg.shell;
     auto& keyboard = arg.keyboard;
+    auto& exit     = arg.exit;
 
     auto buf = fs::dev::KeyboardPacket();
     while(keyboard.read(0, sizeof(fs::dev::KeyboardPacket), &buf)) {
-        shell.input(buf.ascii);
+        if(!shell.input(buf.ascii)) {
+            break;
+        }
     }
+    exit.notify();
     task::manager->get_current_task().exit();
 }
 
-inline auto main(const uint64_t id, const int64_t data) -> void {
+struct TerminalMainArg {
+    const char*  framebuffer_path;
+    task::Task** next_task;
+};
+
+inline auto terminal_main(TerminalMainArg& arg) -> void {
     // open devices
     handle_or(keyboard, "/dev/keyboard-usb0", Read);
-    handle_or(framebuffer, "/dev/fb-uefi0", Write);
+    handle_or(framebuffer, arg.framebuffer_path, Write);
 
     // get framebuffer config
-    auto fb_size = std::array<size_t, 2>();
-    auto fb_data = (uint8_t**)(nullptr);
-    exit_or(framebuffer.control_device(fs::DeviceOperation::GetSize, &fb_size));
-    exit_or(framebuffer.control_device(fs::DeviceOperation::GetDirectPointer, &fb_data));
+    auto fb_size            = std::array<size_t, 2>();
+    auto fb_data            = (uint8_t**)(nullptr);
+    auto fb_double_buffered = false;
+    auto fb_buffer          = std::vector<uint8_t>();
+    return_or(framebuffer.control_device(fs::DeviceOperation::GetSize, &fb_size));
+    return_or(framebuffer.control_device(fs::DeviceOperation::GetDirectPointer, &fb_data));
+    return_or(framebuffer.control_device(fs::DeviceOperation::IsDoubleBuffered, &fb_double_buffered));
+    if(fb_double_buffered) {
+        fb_buffer = std::vector<uint8_t>(fb_size[0] * fb_size[1] * 4);
+    }
 
-    auto refresh   = Event();
-    auto fbwriter  = FramebufferWriter(*fb_data, fb_size);
-    auto term      = Terminal(fbwriter, refresh);
-    auto shell     = Shell(term);
-    auto shell_arg = ShellMainArg{shell, keyboard};
+    auto refresh    = Event();
+    auto fbwriter   = FramebufferWriter(fb_double_buffered ? fb_buffer.data() : *fb_data, fb_size);
+    auto term       = Terminal(fbwriter, refresh);
+    auto shell      = Shell(term);
+    auto shell_exit = Event();
+    auto shell_arg  = ShellMainArg{shell, keyboard, shell_exit};
 
     auto& shell_task = task::manager->new_task();
     shell_task.init_context(shell_main, reinterpret_cast<int64_t>(&shell_arg));
     shell_task.wakeup();
 
-    auto event_waiter = EventsWaiter(std::array{&refresh, &framebuffer.read_event()});
+    auto event_waiter = EventsWaiter(std::array{&refresh, &framebuffer.read_event(), &shell_exit});
     auto swap_done    = true;
     auto swap_pending = false;
-    while(true) {
+    auto exit         = false;
+    while(!exit) {
         switch(event_waiter.wait()) {
         case 0: {
             refresh.reset();
             if(swap_done) {
                 swap_done = false;
-                exit_or(framebuffer.control_device(fs::DeviceOperation::Swap, 0))
+                if(fb_double_buffered) {
+                    memcpy(*fb_data, fb_buffer.data(), fb_buffer.size());
+                }
+                return_or(framebuffer.control_device(fs::DeviceOperation::Swap, 0));
             } else {
                 swap_pending = true;
             }
         } break;
         case 1:
+            framebuffer.read_event().reset();
             if(swap_pending) {
                 swap_pending = false;
-                exit_or(framebuffer.control_device(fs::DeviceOperation::Swap, 0))
+                if(fb_double_buffered) {
+                    memcpy(*fb_data, fb_buffer.data(), fb_buffer.size());
+                }
+                return_or(framebuffer.control_device(fs::DeviceOperation::Swap, 0));
             } else {
                 swap_done = true;
             }
             break;
+        case 2:
+            exit = true;
+            break;
         }
     }
-    printk("terminal exit\n");
-    task::manager->wait_task(&shell_task);
+    {
+        auto [lock, manager] = fs::manager->access();
+        auto& root           = manager.get_fs_root();
+        root.close(std::move(keyboard));
+        root.close(std::move(framebuffer));
+    }
+}
+
+inline auto main(const uint64_t id, const int64_t data) -> void {
+    auto& arg = *reinterpret_cast<TerminalMainArg*>(data);
+    terminal_main(arg);
+
+    auto& term = task::manager->new_task();
+    term.init_context(main, data);
+    *arg.next_task = &term;
+    term.wakeup();
+
     task::manager->get_current_task().exit();
 }
 } // namespace terminal

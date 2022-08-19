@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include "../framebuffer.hpp"
+#include "../fs/drivers/dev.hpp"
 #include "../interrupt/vector.hpp"
 #include "../log.hpp"
 #include "../pci.hpp"
@@ -179,7 +180,7 @@ auto queue_data(queue::Queue& queue, ControlHeader&& header, Payload&& payload) 
 }
 } // namespace internal
 
-class Framebuffer : public ::Framebuffer {
+class LegacyFramebuffer : public ::Framebuffer {
   private:
     std::array<FrameID, 2>  buffers;
     std::array<uint32_t, 2> display_size;
@@ -210,10 +211,51 @@ class Framebuffer : public ::Framebuffer {
         return {display_size[0], display_size[1]};
     }
 
-    Framebuffer(const std::array<FrameID, 2> buffers, const std::array<uint32_t, 2> display_size, queue::Queue& control_queue, uint32_t* const sync_done) : buffers(buffers),
-                                                                                                                                                            display_size(display_size),
-                                                                                                                                                            control_queue(&control_queue),
-                                                                                                                                                            sync_done(sync_done){};
+    LegacyFramebuffer(const std::array<FrameID, 2> buffers, const std::array<uint32_t, 2> display_size, queue::Queue& control_queue, uint32_t* const sync_done) : buffers(buffers),
+                                                                                                                                                                  display_size(display_size),
+                                                                                                                                                                  control_queue(&control_queue),
+                                                                                                                                                                  sync_done(sync_done){};
+};
+
+class Framebuffer : public fs::dev::FramebufferDevice {
+  private:
+    std::array<FrameID, 2> buffers;
+    queue::Queue*          control_queue;
+    uint32_t*              sync_done;
+    bool                   flip = false;
+
+  public:
+    auto swap() -> void override {
+        if(*sync_done == 0) {
+            return;
+        }
+        const auto resource_id = uint32_t(!flip ? 1 : 2);
+
+        using namespace internal;
+        queue_data<TransferToHost2DRequest>(*control_queue, {Control::TransferToHost2D, 0, 0, 0}, {{0, 0, uint32_t(buffer_size[0]), uint32_t(buffer_size[1])}, 0, resource_id, 0});
+        queue_data<ResourceFlushRequest>(*control_queue, {Control::ResourceFlush, 0, 0, 0}, {{0, 0, uint32_t(buffer_size[0]), uint32_t(buffer_size[1])}, resource_id, 0});
+        queue_data<SetScanoutRequest>(*control_queue, {Control::SetScanout, ControlHeader::flag_fence, 1, 0}, {{0, 0, uint32_t(buffer_size[0]), uint32_t(buffer_size[1])}, 0, resource_id});
+        control_queue->notify_device();
+
+        *sync_done = 0;
+        flip       = !flip;
+        data       = static_cast<uint8_t*>(buffers[flip].get_frame());
+        return;
+    }
+
+    auto is_double_buffered() const -> bool override {
+        return true;
+    }
+
+    auto operator=(Framebuffer&&) -> Framebuffer& = delete;
+
+    Framebuffer(const std::array<FrameID, 2> buffers, const std::array<size_t, 2> buffer_size, queue::Queue& control_queue, uint32_t* const sync_done, Event**& sync_done_event) : buffers(buffers),
+                                                                                                                                                                                   control_queue(&control_queue),
+                                                                                                                                                                                   sync_done(sync_done) {
+        data              = static_cast<uint8_t*>(buffers[flip].get_frame());
+        this->buffer_size = buffer_size;
+        sync_done_event   = &write_event;
+    };
 };
 
 class GPUDevice {
@@ -234,8 +276,9 @@ class GPUDevice {
 
     std::array<uint32_t, 2>                          display_size = {1024, 768};
     std::pair<std::array<SmartFrameID, 2>, uint64_t> framebuffer;
-    std::optional<Framebuffer>                       virtio_framebuffer;
-    uint32_t                                         sync_done = 1;
+    std::optional<LegacyFramebuffer>                 virtio_framebuffer;
+    uint32_t                                         sync_done       = 1;
+    Event**                                          sync_done_event = nullptr;
 
   public:
     auto process_control_queue() -> Error {
@@ -324,10 +367,11 @@ class GPUDevice {
                 if(setup_stage != SetupStage::Attach) {
                     break;
                 }
+                task::kernel_task->send_message(MessageType::VirtIOGPUNewDevice);
                 virtio_framebuffer.emplace(std::array{*framebuffer.first[0], *framebuffer.first[1]}, display_size, control_queue, &sync_done);
                 auto [w, h]   = ::framebuffer->get_size();
                 ::framebuffer = &virtio_framebuffer.value();
-                if(w != display_size[0] || w != display_size[1]) {
+                if(w != display_size[0] || h != display_size[1]) {
                     task::kernel_task->send_message(MessageType::ScreenResized);
                 }
             } break;
@@ -346,9 +390,17 @@ class GPUDevice {
             if(response->flags & internal::ControlHeader::flag_fence) {
                 sync_done = 1;
                 task::kernel_task->send_message(MessageType::RefreshScreenDone);
+                if(sync_done_event != nullptr && *sync_done_event != nullptr) {
+                    (*sync_done_event)->notify();
+                }
             }
         }
         return Error::Code::Success;
+    }
+
+    auto create_devfs_framebuffer() -> std::unique_ptr<Framebuffer> {
+        auto fb = new Framebuffer(std::array{*framebuffer.first[0], *framebuffer.first[1]}, {display_size[0], display_size[1]}, control_queue, &sync_done, sync_done_event);
+        return std::unique_ptr<Framebuffer>(fb);
     }
 
     GPUDevice()            = default;

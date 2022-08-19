@@ -22,13 +22,13 @@
 #include "print.hpp"
 #include "segment.hpp"
 #include "syscall.hpp"
+#include "terminal.hpp"
 #include "timer.hpp"
 #include "uefi/gop-framebuffer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
 #include "window-manager.hpp"
-#include "terminal.hpp"
 
 class Kernel {
   private:
@@ -75,7 +75,7 @@ class Kernel {
 
         // create task manager
         // mutex needs this
-        auto tm            = task::TaskManager();
+        auto tm       = task::TaskManager();
         task::manager = &tm;
 
         // create debug output
@@ -219,10 +219,10 @@ class Kernel {
             }
         }
 
-        auto gpu_device = std::optional<virtio::gpu::GPUDevice>();
+        auto virtio_gpu_device = std::optional<virtio::gpu::GPUDevice>();
         if(virtio_gpu != nullptr) {
             if(auto result = virtio::gpu::initialize(*virtio_gpu)) {
-                gpu_device.emplace(std::move(result.as_value()));
+                virtio_gpu_device.emplace(std::move(result.as_value()));
             } else {
                 logger(LogLevel::Error, "failed to initilize virtio gpu: %d", result.as_error());
             }
@@ -237,14 +237,21 @@ class Kernel {
         disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(&sata_controller.value()));
         disk_finder.wakeup(1);
 
-        auto& term = task::manager->new_task();
-        term.init_context(terminal::main, 0);
-        term.wakeup();
+        // auto& guiterm = task::manager->new_task();
+        // guiterm.init_context(GUITerminal::main, reinterpret_cast<int64_t>(&window_manager->get_layer(application_layer)));
+        // guiterm.wakeup();
 
-        refresh();
+        auto term_arg = terminal::TerminalMainArg{"/dev/fb-uefi0", nullptr};
+        auto term     = &task::manager->new_task();
+        term->init_context(terminal::main, reinterpret_cast<int64_t>(&term_arg));
+        term->wakeup();
+
+        // refresh();
 
         auto refresh_screen_done = true;
         auto refresh_pending     = false;
+
+        auto virtio_gpu_framebuffer = std::unique_ptr<virtio::gpu::Framebuffer>();
 
         printk("klee.\n");
 
@@ -257,7 +264,7 @@ class Kernel {
             goto loop;
         }
 
-        //debug::println("event %d\n", (int)message->type);
+        // debug::println("event %d\n", (int)message->type);
 
         switch(message->type) {
         case MessageType::XHCIInterrupt:
@@ -311,8 +318,8 @@ class Kernel {
             }
             refresh_screen_done = false;
             refresh_pending     = false;
-            window_manager->refresh(focused_window);
-            framebuffer->swap();
+        //    window_manager->refresh(focused_window);
+        //    framebuffer->swap();
             break;
         case MessageType::RefreshScreenDone:
             refresh_screen_done = true;
@@ -324,8 +331,15 @@ class Kernel {
             const auto [w, h] = framebuffer->get_size();
             background->resize_window(w, h);
         } break;
+        case MessageType::VirtIOGPUNewDevice: {
+            virtio_gpu_framebuffer = virtio_gpu_device->create_devfs_framebuffer();
+            if(const auto e = devfs::create_device_file("fb-virtio0", reinterpret_cast<uintptr_t>(virtio_gpu_framebuffer.get()))) {
+                logger(LogLevel::Error, "failed to create virtio gpu device file\n");
+            }
+            term_arg.framebuffer_path = "/dev/fb-virtio0";
+        } break;
         case MessageType::VirtIOGPUControl:
-            gpu_device->process_control_queue();
+            virtio_gpu_device->process_control_queue();
             break;
         case MessageType::VirtIOGPUCursor:
             break;

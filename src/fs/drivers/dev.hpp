@@ -58,7 +58,8 @@ class FramebufferDevice : public Device {
         return &data;
     }
 
-    virtual auto swap() -> void = 0;
+    virtual auto swap() -> void                     = 0;
+    virtual auto is_double_buffered() const -> bool = 0;
 };
 
 struct KeyboardPacket {
@@ -240,6 +241,9 @@ class Driver : public fs::Driver {
             } break;
             case DeviceOperation::Swap: {
                 fb.swap();
+            } break;
+            case DeviceOperation::IsDoubleBuffered: {
+                *reinterpret_cast<bool*>(arg) = fb.is_double_buffered();
             } break;
             default:
                 return Error::Code::InvalidDeviceOperation;
