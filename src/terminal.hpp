@@ -5,7 +5,7 @@
 namespace terminal {
 class FramebufferWriter {
   private:
-    uint8_t*             data;
+    uint8_t*              data;
     std::array<size_t, 2> size;
 
     auto find_pointer(const Point point) -> uint8_t* {
@@ -399,29 +399,29 @@ class Shell {
                 return true;
             }
             handle_or(argv[1]);
-            for(auto i = size_t(0); i < handle.get_filesize(); i += 1) {
-                auto c = char();
-                if(const auto read = handle.read(i, 1, &c); !read) {
+            auto           size   = handle.get_filesize();
+            auto           offset = 0;
+            constexpr auto chunk  = size_t(512);
+            auto           buffer = std::array<char, chunk>();
+            while(size > 0) {
+                const auto read_size   = std::min(size, chunk);
+                auto       read_result = size_t();
+                if(const auto read = handle.read(offset, read_size, buffer.data()); !read) {
                     print("read error: %d\n", read.as_error().as_int());
                     close_handle(std::move(handle));
                     return true;
+                } else {
+                    read_result = read.as_value();
                 }
-                if(c >= 0x20) {
-                    putc(c);
-                    continue;
+
+                for(auto& c : buffer) {
+                    if(c <= 0x00 || c == 0x09) {
+                        c = ' ';
+                    }
                 }
-                if(c <= 0) {
-                    putc(' ');
-                    continue;
-                }
-                switch(c) {
-                case 0x09:
-                    putc(' ');
-                    break;
-                case 0x0A:
-                    putc('\n');
-                    break;
-                }
+                size -= read_size;
+                offset += read_size;
+                puts({buffer.data(), read_result});
             }
             close_handle(std::move(handle));
         } else if(argv[0] == "run") {
