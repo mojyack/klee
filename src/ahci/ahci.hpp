@@ -36,9 +36,14 @@ struct DeviceInfo {
     size_t total_sectors;
 };
 
+struct IdentifySync {
+    std::atomic_uint32_t count = 0;
+    Event                event;
+};
+
 class SATADevice {
   private:
-    friend auto initialize(const pci::Device& dev) -> std::optional<Controller>;
+    friend auto initialize(const pci::Device& dev) -> std::unique_ptr<Controller>;
 
     static constexpr auto bytes_per_sector = size_t(512);
 
@@ -67,6 +72,7 @@ class SATADevice {
     std::unique_ptr<internal::HBAFIS>        received_fis;
     std::array<Operation, 32>                running_operations = {Operation::None};
     std::unique_ptr<uint8_t>                 identify_buffer;
+    IdentifySync*                            identify_sync;
     size_t                                   lba_size = 0;
     std::array<char, 20>                     model_name;
 
@@ -168,6 +174,8 @@ class SATADevice {
                 }
                 logger(LogLevel::Debug, "[ahci] disk identified: \"%.20s\" %luMiB\n", model_name.data(), lba_size * bytes_per_sector / 1024 / 1024);
                 identify_buffer.reset();
+                identify_sync->count++;
+                identify_sync->event.notify();
                 running_operations[slot] = Operation::None;
             } break;
             case Operation::Read:
@@ -180,7 +188,7 @@ class SATADevice {
         }
     }
 
-    auto identify() -> bool {
+    auto identify(IdentifySync& sync) -> bool {
         using namespace internal;
 
         auto cfis = RegH2DFIS();
@@ -192,6 +200,7 @@ class SATADevice {
         cfis.command  = ata::Commands::IdentifyDevice;
 
         identify_buffer.reset(new uint8_t[bytes_per_sector]);
+        identify_sync = &sync;
 
         return emit_h2d_command(identify_buffer.get(), bytes_per_sector, bytes_per_sector, cfis, Operation::Identify, nullptr);
     }
@@ -236,6 +245,7 @@ class Controller {
     volatile internal::HBAHeader* hba;
     std::vector<SATADevice>       ports;
     std::array<int8_t, 32>        available_ports;
+    IdentifySync                  identify_sync;
 
   public:
     auto on_interrupt() -> void {
@@ -244,6 +254,15 @@ class Controller {
             if(f & (1u << available_ports[i])) {
                 ports[i].on_interrupt();
             }
+        }
+    }
+
+    auto wait_identify() -> void {
+        while(true) {
+            if(identify_sync.count == ports.size()) {
+                return;
+            }
+            identify_sync.event.wait();
         }
     }
 
@@ -264,19 +283,20 @@ class Controller {
         *b = -1;
 
         for(auto& d : this->ports) {
-            d.identify();
+            d.identify(identify_sync);
         }
+        task::kernel_task->send_message_may_fail(MessageType::AHCIInterrupt);
     }
 };
 
-inline auto initialize(const pci::Device& dev) -> std::optional<Controller> {
+inline auto initialize(const pci::Device& dev) -> std::unique_ptr<Controller> {
     using namespace internal;
 
     logger(LogLevel::Debug, "[ahci] controller found at %d.%d.%d\n", dev.bus, dev.device, dev.function);
     const auto abar = dev.read_bar(5);
     if(!abar) {
         logger(LogLevel::Error, "[ahci] failed to read bar\n");
-        return std::nullopt;
+        return nullptr;
     }
 
     const auto     hba_addr   = abar.as_value() & ~static_cast<uint64_t>(0x0F);
@@ -284,7 +304,7 @@ inline auto initialize(const pci::Device& dev) -> std::optional<Controller> {
 
     if(!hba_header.cap.s64a) {
         logger(LogLevel::Error, "[ahci] hba does not support 64-bit addressing\n");
-        return std::nullopt;
+        return nullptr;
     }
 
     auto devices      = std::vector<SATADevice>();
@@ -364,8 +384,8 @@ inline auto initialize(const pci::Device& dev) -> std::optional<Controller> {
 
     const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
     if(const auto error = dev.configure_msi_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::AHCI, 0)) {
-        logger(LogLevel::Error, "[ahci] failed to setup msi(%d)\n", error);
+        logger(LogLevel::Error, "[ahci] failed to setup msi: %d\n", error.as_int());
     }
-    return Controller(hba_header, std::move(devices));
+    return std::unique_ptr<Controller>(new Controller(hba_header, std::move(devices)));
 }
 } // namespace ahci

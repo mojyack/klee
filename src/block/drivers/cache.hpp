@@ -6,23 +6,19 @@
 #include "../block.hpp"
 
 namespace block::cache {
-template <class P>
-concept Parent = std::derived_from<P, BlockDevice>;
-
 template <Parent P>
-class Device : public BlockDevice {
+class Device : public fs::dev::BlockDevice {
   private:
     struct SectorCache {
         bool                     dirty = false;
         std::unique_ptr<uint8_t> data;
 
-        SectorCache(const size_t sector_size) {
-            data.reset(new uint8_t[sector_size]);
+        SectorCache(const size_t bytes_per_sector) {
+            data.reset(new uint8_t[bytes_per_sector]);
         }
     };
 
     P                                       parent;
-    size_t                                  sector_size;
     std::unordered_map<size_t, SectorCache> cache;
 
     auto get_cache(const size_t sector) -> Result<SectorCache*> {
@@ -30,15 +26,10 @@ class Device : public BlockDevice {
             return &p->second;
         }
 
-        auto new_cache = SectorCache(sector_size);
+        auto new_cache = SectorCache(bytes_per_sector);
         error_or(parent.read_sector(sector, 1, new_cache.data.get()));
 
         return &cache.emplace(sector, std::move(new_cache)).first->second;
-    }
-
-  public:
-    auto get_info() -> DeviceInfo override {
-        return parent.get_info();
     }
 
     auto read_sector(const size_t sector, const size_t count, void* const buffer) -> Error override {
@@ -50,7 +41,7 @@ class Device : public BlockDevice {
             }
 
             auto& cache = *result.as_value();
-            std::memcpy(static_cast<uint8_t*>(buffer) + sector_size * i, cache.data.get(), sector_size);
+            std::memcpy(static_cast<uint8_t*>(buffer) + bytes_per_sector * i, cache.data.get(), bytes_per_sector);
         }
 
         return Error();
@@ -67,15 +58,18 @@ class Device : public BlockDevice {
             auto& cache = *result.as_value();
 
             cache.dirty = true;
-            std::memcpy(cache.data.get(), static_cast<const uint8_t*>(buffer) + sector_size * i, sector_size);
+            std::memcpy(cache.data.get(), static_cast<const uint8_t*>(buffer) + bytes_per_sector * i, bytes_per_sector);
         }
 
         return Error();
     }
 
+  public:
     template <class... Args>
     Device(Args&... args) : parent(args...) {
-        sector_size = parent.get_info().bytes_per_sector;
+        const auto info  = parent.get_info();
+        bytes_per_sector = info.bytes_per_sector;
+        total_sectors    = info.total_sectors;
     }
 };
 } // namespace block::cache

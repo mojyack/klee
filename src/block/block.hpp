@@ -2,6 +2,7 @@
 #include <cstddef>
 
 #include "../error.hpp"
+#include "../fs/drivers/dev.hpp"
 
 namespace block {
 struct DeviceInfo {
@@ -9,12 +10,8 @@ struct DeviceInfo {
     size_t total_sectors;
 };
 
-class BlockDevice {
-  public:
-    virtual auto get_info() -> DeviceInfo                                               = 0;
-    virtual auto read_sector(size_t sector, size_t count, void* buffer) -> Error        = 0;
-    virtual auto write_sector(size_t sector, size_t count, const void* buffer) -> Error = 0;
-
-    virtual ~BlockDevice() = default;
+template <class P>
+concept Parent = std::derived_from<P, fs::dev::BlockDevice> && requires(const P& device) {
+    { device.get_info() } -> std::same_as<DeviceInfo>;
 };
 } // namespace block

@@ -8,6 +8,10 @@ class Device {
     virtual auto read(size_t offset, size_t size, void* buffer) -> Result<size_t>        = 0;
     virtual auto write(size_t offset, size_t size, const void* buffer) -> Result<size_t> = 0;
 
+    virtual auto get_filesize() const -> size_t {
+        return 0;
+    }
+
     virtual auto get_device_type() const -> DeviceType = 0;
     virtual auto on_handle_create(Event& write_event) -> void {}
     virtual auto on_handle_destroy() -> void {}
@@ -136,6 +140,114 @@ class KeyboardDevice : public Device {
     }
 };
 
+class BlockDevice : public Device {
+  protected:
+    size_t bytes_per_sector;
+    size_t total_sectors;
+
+  public:
+    virtual auto read_sector(size_t sector, size_t count, void* buffer) -> Error        = 0;
+    virtual auto write_sector(size_t sector, size_t count, const void* buffer) -> Error = 0;
+
+    auto read(const size_t offset, size_t size, void* buffer_) -> Result<size_t> override {
+        const auto total_size = size;
+        auto       sector     = offset / bytes_per_sector;
+        auto       buffer     = static_cast<uint8_t*>(buffer_);
+
+        if(offset % bytes_per_sector == 0 && size % bytes_per_sector == 0) {
+            if(const auto e = read_sector(sector, size / bytes_per_sector, buffer)) {
+                return e;
+            } else {
+                return size;
+            }
+        }
+
+        auto read_buffer = std::vector<uint8_t>(bytes_per_sector);
+
+        {
+            const auto offset_in_sector = offset % bytes_per_sector;
+            const auto size_in_sector   = bytes_per_sector - offset_in_sector;
+            const auto copy_len         = std::min(size, size_in_sector);
+            error_or(read_sector(sector, 1, read_buffer.data()));
+            memcpy(buffer, read_buffer.data() + offset_in_sector, copy_len);
+            buffer += copy_len;
+            size -= copy_len;
+            sector += 1;
+        }
+
+        if(size != 0) {
+            const auto count = size / bytes_per_sector;
+            error_or(read_sector(sector, count, buffer));
+            buffer += bytes_per_sector * count;
+            size -= bytes_per_sector * count;
+            sector += count;
+        }
+
+        if(size != 0) {
+            error_or(read_sector(sector, 1, read_buffer.data()));
+            memcpy(buffer, read_buffer.data(), size);
+        }
+
+        return size_t(total_size);
+    }
+
+    auto write(size_t offset, size_t size, const void* buffer_) -> Result<size_t> override {
+        const auto total_size = size;
+        auto       sector     = offset / bytes_per_sector;
+        auto       buffer     = static_cast<const uint8_t*>(buffer_);
+
+        if(offset % bytes_per_sector == 0 && size % bytes_per_sector == 0) {
+            if(const auto e = write_sector(sector, size / bytes_per_sector, buffer)) {
+                return e;
+            } else {
+                return size;
+            }
+        }
+
+        auto sector_buffer = std::vector<uint8_t>(bytes_per_sector);
+
+        {
+            error_or(read_sector(sector, 1, sector_buffer.data()));
+            const auto offset_in_sector = offset % bytes_per_sector;
+            const auto size_in_sector   = bytes_per_sector - offset_in_sector;
+            const auto copy_len         = std::min(size, size_in_sector);
+            memcpy(sector_buffer.data() + offset_in_sector, buffer, copy_len);
+            error_or(write_sector(sector, 1, sector_buffer.data()));
+            buffer += copy_len;
+            size -= copy_len;
+            sector += 1;
+        }
+
+        if(size != 0) {
+            const auto count = size / bytes_per_sector;
+            error_or(write_sector(sector, count, buffer));
+            buffer += bytes_per_sector * count;
+            size -= bytes_per_sector * count;
+            sector += count;
+        }
+
+        if(size != 0) {
+            error_or(read_sector(sector, 1, sector_buffer.data()));
+            memcpy(sector_buffer.data(), buffer, size);
+            error_or(write_sector(sector, 1, sector_buffer.data()));
+        }
+
+        return size_t(total_size);
+    }
+
+    auto get_bytes_per_sector() const -> size_t {
+        return bytes_per_sector;
+    }
+
+    auto get_filesize() const -> size_t override {
+        return bytes_per_sector * total_sectors;
+    }
+
+    auto get_device_type() const -> DeviceType override {
+        return DeviceType::Block;
+    }
+};
+
 class Driver : public fs::Driver {
   private:
     OpenInfo root;
@@ -167,7 +279,7 @@ class Driver : public fs::Driver {
         }
 
         if(const auto p = devices.find(std::string(name)); p != devices.end()) {
-            return OpenInfo(p->first, *this, p->second.get(), FileType::Device, 0, false, true);
+            return OpenInfo(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize(), false, true);
         } else {
             return Error::Code::NoSuchFile;
         }
@@ -186,7 +298,7 @@ class Driver : public fs::Driver {
         }
 
         const auto p = std::next(devices.begin(), index);
-        return OpenInfo(p->first, *this, p->second.get(), FileType::Device, 0, false, true);
+        return OpenInfo(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize(), false, true);
     }
 
     auto remove(OpenInfo& info, const std::string_view name) -> Error override {
@@ -257,6 +369,16 @@ class Driver : public fs::Driver {
             }
         } break;
         case DeviceType::Mouse: {
+        } break;
+        case DeviceType::Block: {
+            auto& block = *reinterpret_cast<BlockDevice*>(&device);
+            switch(op) {
+            case DeviceOperation::GetBytesPerSector:
+                *reinterpret_cast<size_t*>(arg) = block.get_bytes_per_sector();
+                break;
+            default:
+                return Error::Code::InvalidDeviceOperation;
+            }
         } break;
         }
         return Error();

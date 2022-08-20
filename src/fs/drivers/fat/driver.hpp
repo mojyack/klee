@@ -3,7 +3,7 @@
 
 #include "../../../block/block.hpp"
 #include "../../../macro.hpp"
-#include "../../fs.hpp"
+#include "../../manager.hpp"
 #include "fat.hpp"
 
 namespace fs::fat {
@@ -20,10 +20,44 @@ struct DirectoryInfo {
     Attribute   attribute;
 };
 
+class BlockDevice {
+  private:
+    fs::Handle handle;
+    size_t     bytes_per_sector;
+
+  public:
+    auto init() -> Error {
+        error_or(handle.control_device(fs::DeviceOperation::GetBytesPerSector, &bytes_per_sector));
+        return Error();
+    }
+
+    auto get_bytes_per_sector() const -> size_t {
+        return bytes_per_sector;
+    }
+
+    auto read_sector(const size_t sector, const size_t count, void* const buffer) -> Error {
+        if(const auto r = handle.read(sector * bytes_per_sector, count * bytes_per_sector, buffer); !r) {
+            return r.as_error();
+        }
+        return Error();
+    }
+
+    auto write_sector(const size_t sector, const size_t count, const void* const buffer) -> Error {
+        if(const auto r = handle.write(sector * bytes_per_sector, count * bytes_per_sector, buffer); !r) {
+            return r.as_error();
+        }
+        return Error();
+    }
+
+    BlockDevice(fs::Handle handle) : handle(std::move(handle)) {}
+
+    ~BlockDevice();
+};
+
 class ClusterOperator {
   private:
     const BPB::Summary& bpb;
-    block::BlockDevice& block;
+    BlockDevice&        block;
 
     template <bool write>
     auto cluster_operation(const size_t cluster, std::conditional_t<write, const uint8_t*, uint8_t*> buffer) -> Error {
@@ -53,26 +87,26 @@ class ClusterOperator {
     }
 
     auto get_cluster_size_bytes() const -> size_t {
-        return block.get_info().bytes_per_sector * bpb.sectors_per_cluster;
+        return block.get_bytes_per_sector() * bpb.sectors_per_cluster;
     }
 
-    ClusterOperator(const BPB::Summary& bpb, block::BlockDevice& block) : bpb(bpb), block(block) {}
+    ClusterOperator(const BPB::Summary& bpb, BlockDevice& block) : bpb(bpb), block(block) {}
 };
 
 constexpr auto end_of_cluster_chain = 0x0FFFFFF8;
 
-inline auto read_fat_for_cluster(const uint32_t cluster, const BPB::Summary& bpb, block::BlockDevice& block) -> uint32_t {
+inline auto read_fat_for_cluster(const uint32_t cluster, const BPB::Summary& bpb, BlockDevice& block) -> uint32_t {
     // fat[0] and fat[1] are reserved
 
     const auto sector = bpb.reserved_sector_count + (cluster * 4 / bpb.bytes_per_sector);
     const auto offset = cluster * 4 % bpb.bytes_per_sector;
 
-    auto buffer = std::vector<uint8_t>(block.get_info().bytes_per_sector);
+    auto buffer = std::vector<uint8_t>(block.get_bytes_per_sector());
     block.read_sector(sector, 1, buffer.data());
     return *reinterpret_cast<uint32_t*>(buffer.data() + offset);
 }
 
-inline auto increment_fat(uint32_t& cluster, const uint32_t count, const BPB::Summary& bpb, block::BlockDevice& block) -> bool {
+inline auto increment_fat(uint32_t& cluster, const uint32_t count, const BPB::Summary& bpb, BlockDevice& block) -> bool {
     for(auto i = size_t(0); i < count; i += 1) {
         if(cluster == end_of_cluster_chain) {
             return false;
@@ -87,7 +121,7 @@ class DirectoryIterator {
     uint32_t            cluster;
     uint32_t            index;
     const BPB::Summary& bpb;
-    block::BlockDevice& block;
+    BlockDevice&        block;
     ClusterOperator     op;
 
   public:
@@ -184,17 +218,17 @@ class DirectoryIterator {
         return Error::Code::EndOfFile;
     }
 
-    DirectoryIterator(const uint32_t first_cluster, const BPB::Summary& bpb, block::BlockDevice& block) : cluster(first_cluster),
-                                                                                                          index(0),
-                                                                                                          bpb(bpb),
-                                                                                                          block(block),
-                                                                                                          op(bpb, block) {}
+    DirectoryIterator(const uint32_t first_cluster, const BPB::Summary& bpb, BlockDevice& block) : cluster(first_cluster),
+                                                                                                   index(0),
+                                                                                                   bpb(bpb),
+                                                                                                   block(block),
+                                                                                                   op(bpb, block) {}
 };
 
 class Driver : public fs::Driver {
   private:
-    block::BlockDevice* block;
-    BPB::Summary        bpb;
+    BlockDevice  block;
+    BPB::Summary bpb;
 
     OpenInfo root;
 
@@ -207,12 +241,13 @@ class Driver : public fs::Driver {
 
   public:
     auto init() -> Error {
-        auto buffer = std::vector<uint8_t>(block->get_info().bytes_per_sector);
-        error_or(block->read_sector(0, 1, buffer.data()));
+        error_or(block.init());
+        auto buffer = std::vector<uint8_t>(block.get_bytes_per_sector());
+        error_or(block.read_sector(0, 1, buffer.data()));
         const auto& bpb = *reinterpret_cast<BPB*>(buffer.data());
 
         assert(bpb.signature[0] == 0x55 && bpb.signature[1] == 0xAA, Error::Code::NotFAT);
-        assert(bpb.bytes_per_sector == block->get_info().bytes_per_sector, Error::Code::NotImplemented);
+        assert(bpb.bytes_per_sector == block.get_bytes_per_sector(), Error::Code::NotImplemented);
 
         this->bpb  = bpb.summary();
         this->root = OpenInfo("/", *this, this->bpb.root_cluster, FileType::Directory, true);
@@ -231,11 +266,11 @@ class Driver : public fs::Driver {
             return Error::Code::EndOfFile;
         }
 
-        auto       op                = ClusterOperator(bpb, *block);
+        auto       op                = ClusterOperator(bpb, block);
         auto       buffer            = static_cast<uint8_t*>(buffer_);
         const auto bytes_per_cluster = op.get_cluster_size_bytes();
         auto       cluster           = static_cast<uint32_t>(info.get_driver_data());
-        if(!increment_fat(cluster, offset / bytes_per_cluster, bpb, *block)) {
+        if(!increment_fat(cluster, offset / bytes_per_cluster, bpb, block)) {
             return Error::Code::EndOfFile;
         }
         auto read_buffer = std::vector<uint8_t>(bytes_per_cluster);
@@ -248,7 +283,7 @@ class Driver : public fs::Driver {
             memcpy(buffer, read_buffer.data() + offset_in_cluster, copy_len);
             buffer += copy_len;
             size -= copy_len;
-            if(!increment_fat(cluster, 1, bpb, *block)) {
+            if(!increment_fat(cluster, 1, bpb, block)) {
                 return Error::Code::EndOfFile;
             }
         }
@@ -258,7 +293,7 @@ class Driver : public fs::Driver {
             memcpy(buffer, read_buffer.data(), bytes_per_cluster);
             buffer += bytes_per_cluster;
             size -= bytes_per_cluster;
-            if(size != 0 && !increment_fat(cluster, 1, bpb, *block)) {
+            if(size != 0 && !increment_fat(cluster, 1, bpb, block)) {
                 return Error::Code::EndOfFile;
             }
         }
@@ -279,7 +314,7 @@ class Driver : public fs::Driver {
         if(info.type != FileType::Directory) {
             return Error::Code::InvalidData;
         }
-        auto iterator = DirectoryIterator(static_cast<size_t>(info.get_driver_data()), bpb, *block);
+        auto iterator = DirectoryIterator(static_cast<size_t>(info.get_driver_data()), bpb, block);
         while(true) {
             const auto dinfo_result = iterator.read();
             if(!dinfo_result) {
@@ -306,7 +341,7 @@ class Driver : public fs::Driver {
         if(info.type != FileType::Directory) {
             return Error::Code::InvalidData;
         }
-        auto iterator = DirectoryIterator(static_cast<size_t>(info.get_driver_data()), bpb, *block);
+        auto iterator = DirectoryIterator(static_cast<size_t>(info.get_driver_data()), bpb, block);
         if(iterator.skip(index)) {
             return Error::Code::IndexOutOfRange;
         }
@@ -323,15 +358,8 @@ class Driver : public fs::Driver {
         return root;
     }
 
-    Driver(block::BlockDevice& block) : block(&block),
-                                        root("/", *this, nullptr, FileType::Directory, 0, true) {}
+    Driver(fs::Handle handle) : block(std::move(handle)),
+                                root("/", *this, nullptr, FileType::Directory, 0, true) {}
 };
-
-inline auto new_driver(block::BlockDevice& block) -> Result<std::unique_ptr<Driver>> {
-    auto driver = std::unique_ptr<Driver>(new Driver(block));
-    error_or(driver->init());
-    return driver;
-}
-
 #undef assert
 } // namespace fs::fat

@@ -1,5 +1,5 @@
 #pragma once
-#include "fs/main.hpp"
+#include "fs/manager.hpp"
 #include "task/elf-startup.hpp"
 
 namespace terminal {
@@ -324,18 +324,9 @@ class Shell {
             for(auto i = 0; i < printk_buffer.len; i += 1) {
                 putc(printk_buffer.buffer[(i + printk_buffer.head) % printk_buffer.buffer.size()]);
             }
-        } else if(argv[0] == "lsblk") {
-            auto disks = std::vector<std::string>();
-            {
-                auto [lock, manager] = fs::manager->access();
-                disks                = manager.list_block_devices();
-            }
-            for(const auto& d : disks) {
-                puts(d.data());
-            }
         } else if(argv[0] == "mount") {
             if(argv.size() == 1) {
-                auto mounts = std::vector<fs::MountRecord>();
+                auto mounts = std::vector<std::array<std::string, 2>>();
                 {
                     auto [lock, manager] = fs::manager->access();
                     mounts               = manager.get_mounts();
@@ -345,7 +336,7 @@ class Shell {
                     return true;
                 }
                 for(const auto& m : mounts) {
-                    print("%s on \"%s\"\n", fs::mdev_to_str(m.device).data(), m.path.data());
+                    print("%s on \"%s\"\n", m[0].data(), m[1].data());
                 }
             } else if(argv.size() == 3) {
                 auto e = Error();

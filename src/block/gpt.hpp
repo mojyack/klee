@@ -85,13 +85,13 @@ enum class Filesystem {
 };
 
 struct Partition {
-    Filesystem                   filesystem;
-    std::unique_ptr<BlockDevice> device;
+    Filesystem                            filesystem;
+    std::unique_ptr<fs::dev::BlockDevice> device;
 };
 
-inline auto find_partitions(BlockDevice& device) -> Result<std::vector<Partition>> {
-    auto info   = device.get_info();
-    auto buffer = std::vector<uint8_t>(info.bytes_per_sector);
+inline auto find_partitions(fs::dev::BlockDevice& device) -> Result<std::vector<Partition>> {
+    const auto bytes_per_sector = device.get_bytes_per_sector();
+    auto       buffer           = std::vector<uint8_t>(bytes_per_sector);
 
     device.read_sector(0, 1, buffer.data());
     const auto& mbr = *reinterpret_cast<MBR*>(buffer.data());
@@ -114,12 +114,12 @@ inline auto find_partitions(BlockDevice& device) -> Result<std::vector<Partition
 
     auto result = std::vector<Partition>();
     for(auto i = 0, buffer_lba = -1; i < header.num_entries; i += 1) {
-        const auto lba = header.entry_array_lba + sizeof(PartitionEntry) * i / info.bytes_per_sector;
+        const auto lba = header.entry_array_lba + sizeof(PartitionEntry) * i / bytes_per_sector;
         if(buffer_lba != lba) {
             buffer_lba = lba;
             device.read_sector(lba, 1, buffer.data());
         }
-        const auto& entry = *reinterpret_cast<PartitionEntry*>(buffer.data() + sizeof(PartitionEntry) * i % info.bytes_per_sector);
+        const auto& entry = *reinterpret_cast<PartitionEntry*>(buffer.data() + sizeof(PartitionEntry) * i % bytes_per_sector);
         if(entry.type == GUID{0, 0}) {
             continue;
         }

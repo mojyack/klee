@@ -1,7 +1,6 @@
 #pragma once
 #include <deque>
 
-#include "devfs/helper.hpp"
 #include "usb/classdriver/mouse.hpp"
 
 namespace mouse {

@@ -2,7 +2,7 @@
 #include "ahci/ahci.hpp"
 #include "debug.hpp"
 #include "devfs/framebuffer.hpp"
-#include "fs/main.hpp"
+#include "fs/manager-impl.hpp"
 #include "interrupt/interrupt.hpp"
 #include "keyboard.hpp"
 #include "memory-map.h"
@@ -74,7 +74,8 @@ class Kernel {
 
         // create uefi framebuffer
         auto gop_framebuffer = devfs::GOPFrameBuffer(framebuffer_config);
-        if(devfs::create_device_file("fb-uefi0", reinterpret_cast<uintptr_t>(&gop_framebuffer))) {
+        if(fs::manager->unsafe_access().create_device_file("fb-uefi0", &gop_framebuffer)) {
+            debug::println("failed to create uefi framebuffer");
             return;
         }
 
@@ -161,7 +162,7 @@ class Kernel {
 
         // connect usb devices
         auto usb_keyboard = devfs::USBKeyboard();
-        if(devfs::create_device_file("keyboard-usb0", reinterpret_cast<uintptr_t>(&usb_keyboard))) {
+        if(fs::manager->unsafe_access().create_device_file("keyboard-usb0", &usb_keyboard)) {
             return;
         }
         mouse::setup();
@@ -186,14 +187,16 @@ class Kernel {
             }
         }
 
-        auto sata_controller = std::optional<ahci::Controller>();
+        auto sata_controller = std::unique_ptr<ahci::Controller>();
         if(ahci_dev != nullptr) {
             sata_controller = ahci::initialize(*ahci_dev);
         }
 
-        auto& disk_finder = task::manager->new_task();
-        disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(&sata_controller.value()));
-        disk_finder.wakeup(1);
+        if(sata_controller) {
+            auto& disk_finder = task::manager->new_task();
+            disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(sata_controller.get()));
+            disk_finder.wakeup(1);
+        }
 
         auto term_arg = terminal::TerminalMainArg{"/dev/fb-uefi0", nullptr};
         auto term     = &task::manager->new_task();
@@ -213,7 +216,7 @@ class Kernel {
             goto loop;
         }
 
-        // debug::println("event %d\n", (int)message->type);
+        // debug::println("event ", (int)message->type);
 
         switch(message->type) {
         case MessageType::XHCIInterrupt:
@@ -230,7 +233,7 @@ class Kernel {
             break;
         case MessageType::VirtIOGPUNewDevice: {
             virtio_gpu_framebuffer = virtio_gpu_device->create_devfs_framebuffer();
-            if(const auto e = devfs::create_device_file("fb-virtio0", reinterpret_cast<uintptr_t>(virtio_gpu_framebuffer.get()))) {
+            if(const auto e = fs::manager->access().second.create_device_file("fb-virtio0", virtio_gpu_framebuffer.get())) {
                 logger(LogLevel::Error, "failed to create virtio gpu device file\n");
             }
             term_arg.framebuffer_path = "/dev/fb-virtio0";

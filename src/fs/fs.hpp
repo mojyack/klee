@@ -21,6 +21,7 @@ enum class DeviceType : uint32_t {
     Framebuffer,
     Keyboard,
     Mouse,
+    Block,
 };
 
 enum class DeviceOperation {
@@ -29,6 +30,8 @@ enum class DeviceOperation {
     GetDirectPointer,
     Swap,
     IsDoubleBuffered,
+    // Block
+    GetBytesPerSector,
 };
 
 class Driver;
