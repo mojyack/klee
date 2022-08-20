@@ -305,7 +305,7 @@ class Controller {
             }
 
             const auto volume_root = mountpoint->mount;
-            if(volume_root->is_busy()) {
+            if(volume_root->is_busy() && !volume_root->is_permanent()) {
                 return Error::Code::VolumeBusy;
             }
             mountpoint->mount = nullptr;

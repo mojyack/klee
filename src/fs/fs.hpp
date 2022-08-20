@@ -42,6 +42,7 @@ class OpenInfo {
     uintptr_t driver_data;
     bool      volume_root;
     bool      exclusive;
+    bool      permanent; // even if the volume is unmounted, this OpenInfo is not deleted
 
     auto check_opened(const bool write) -> bool {
         if((write && write_count == 0) || (!write && read_count == 0 && write_count == 0)) {
@@ -89,6 +90,10 @@ class OpenInfo {
         return exclusive;
     }
 
+    auto is_permanent() const -> bool {
+        return permanent;
+    }
+
     auto read_driver() const -> const Driver* {
         return driver;
     }
@@ -98,13 +103,22 @@ class OpenInfo {
         return driver_data;
     }
 
-    OpenInfo(const std::string_view name, Driver& driver, const auto driver_data, const FileType type, const size_t filesize, const bool volume_root = false, const bool exclusive = false) : driver(&driver),
-                                                                                                                                                                                              driver_data((uintptr_t)driver_data),
-                                                                                                                                                                                              volume_root(volume_root),
-                                                                                                                                                                                              exclusive(exclusive),
-                                                                                                                                                                                              name(name),
-                                                                                                                                                                                              type(type),
-                                                                                                                                                                                              filesize(filesize) {}
+    OpenInfo(const std::string_view name,
+             Driver&                driver,
+             const auto             driver_data,
+             const FileType         type,
+             const size_t           filesize,
+             const bool             volume_root = false,
+             const bool             exclusive   = false,
+             const bool             permanent   = false)
+        : driver(&driver),
+          driver_data((uintptr_t)driver_data),
+          volume_root(volume_root),
+          exclusive(exclusive),
+          permanent(permanent),
+          name(name),
+          type(type),
+          filesize(filesize) {}
 
     // test stuff
     struct Testdata {
