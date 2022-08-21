@@ -15,6 +15,7 @@
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
+#include "task/task-impl.hpp"
 
 class Kernel {
   private:
@@ -282,9 +283,9 @@ extern "C" auto int_handler_lapic_timer(task::TaskContext& context) -> void {
 
 // syscall.hpp
 namespace syscall {
-extern "C" auto syscall_table = std::array<SyscallFunc*, 2>{
-    syscall_printk,
-    syscall_exit,
+extern "C" auto syscall_table = std::array<void*, 2>{
+    (void*)syscall_printk,
+    (void*)syscall_exit,
 };
 }
 

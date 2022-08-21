@@ -285,7 +285,7 @@ class Controller {
         for(auto& d : this->ports) {
             d.identify(identify_sync);
         }
-        task::kernel_task->send_message_may_fail(MessageType::AHCIInterrupt);
+        task::kernel_task->send_message(MessageType::AHCIInterrupt);
     }
 };
 

@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "../memory-manager.hpp"
 #include "../message.hpp"
 #include "../paging.hpp"
 #include "../segment.hpp"
@@ -45,88 +44,24 @@ class Task {
   public:
     static constexpr auto default_stack_bytes = size_t(4096);
 
-    auto get_id() const -> uint64_t {
-        return id;
-    }
-
-    auto init_context(TaskEntry* const func, const int64_t data) -> Error {
-        entry = func;
-
-        const auto stack_size = default_stack_bytes / sizeof(stack[0]);
-        stack.resize(stack_size);
-        const auto stack_end = reinterpret_cast<uint64_t>(&stack[stack_size]);
-
-        memset(&context, 0, sizeof(context));
-        context.rip = reinterpret_cast<uint64_t>(func);
-        context.rdi = id;
-        context.rsi = data;
-
-        context.cr3    = get_cr3();
-        context.rflags = 0x202;
-        context.cs     = segment::kernel_cs.data;
-        context.ss     = segment::kernel_ss.data;
-        context.rsp    = (stack_end & ~0x0Flu) - 8;
-
-        // mask all exceptions of MXCSR
-        *reinterpret_cast<uint32_t*>(&context.fxsave_area[24]) = 0x1f80;
-
-        return Error();
-    }
-
-    auto send_message(Message message) -> void {
-        messages.push_back(std::move(message));
-        wakeup();
-    }
-
-    auto send_message_may_fail(Message message) -> void {
-        messages.push_back(std::move(message));
-        wakeup_may_fail();
-    }
-
-    auto receive_message() -> std::optional<Message> {
-        if(messages.empty()) {
-            return std::nullopt;
-        }
-
-        auto m = messages.front();
-        messages.pop_front();
-        return m;
-    }
+    auto get_id() const -> uint64_t;
+    auto init_context(TaskEntry* const func, const int64_t data) -> Error;
+    auto send_message(Message message) -> void;
+    auto send_message_may_fail(Message message) -> void;
+    auto receive_message() -> std::optional<Message>;
 
     auto exit() -> void;
     auto sleep() -> Task&;
     auto wakeup(int nice = -1) -> Task&;
     auto wakeup_may_fail() -> void; // used by interrupt
-
     auto wait_event(uint64_t event_id) -> void;
-
     auto wait_events(std::vector<uint64_t> event_ids) -> void;
 
     // for manager
-
-    auto get_system_stack_pointer() -> uint64_t& {
-        return system_stack_pointer;
-    }
-
-    auto get_context() -> TaskContext& {
-        return context;
-    }
-
-    auto get_page_map() -> std::unique_ptr<PageMap>& {
-        return page_map;
-    }
-
-    auto apply_page_map() -> void {
-        auto& pml4e = paging::pml4_table[0b100000000];
-        if(page_map) {
-            pml4e.data              = reinterpret_cast<uint64_t>(page_map->upper_page_map.data.data());
-            pml4e.directory.present = 1;
-            pml4e.directory.write   = 1;
-            pml4e.directory.user    = 1;
-        } else {
-            pml4e.data = 0;
-        }
-    }
+    auto get_system_stack_pointer() -> uint64_t&;
+    auto get_context() -> TaskContext&;
+    auto get_page_map() -> std::unique_ptr<PageMap>&;
+    auto apply_page_map() -> void;
 
     Task(const uint64_t id) : id(id) {}
 };

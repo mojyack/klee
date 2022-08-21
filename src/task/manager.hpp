@@ -1,11 +1,10 @@
 #pragma once
-#include "task.hpp"
-
 #include "../asmcode.h"
 #include "../debug.hpp"
 #include "../error.hpp"
 #include "../mutex-like.hpp"
 #include "../util/container-of.hpp"
+#include "task.hpp"
 
 extern "C" uint64_t self_task_system_stack;
 
@@ -394,32 +393,5 @@ class TaskManager {
 };
 
 inline auto manager = (TaskManager*)(nullptr);
-
-inline auto Task::exit() -> void {
-    manager->exit_task(this);
-}
-
-inline auto Task::sleep() -> Task& {
-    manager->sleep(this);
-    return *this;
-}
-
-inline auto Task::wakeup(const int nice) -> Task& {
-    manager->wakeup(this, nice);
-    return *this;
-}
-
-inline auto Task::wakeup_may_fail() -> void {
-    manager->wakeup_may_fail(this);
-}
-
-inline auto Task::wait_event(const uint64_t event_id) -> void {
-    manager->wait_event(event_id, this);
-}
-
-inline auto Task::wait_events(std::vector<uint64_t> event_ids) -> void {
-    manager->wait_events(std::move(event_ids), this);
-}
-
 inline auto kernel_task = (Task*)(nullptr);
 } // namespace task
