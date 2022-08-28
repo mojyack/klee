@@ -14,6 +14,7 @@ class Device {
 
     virtual auto get_device_type() const -> DeviceType = 0;
     virtual auto on_handle_create(Event& write_event) -> void {}
+    virtual auto on_handle_update(Event& write_event) -> void {}
     virtual auto on_handle_destroy() -> void {}
 
     virtual ~Device() {}
@@ -47,6 +48,10 @@ class FramebufferDevice : public Device {
     }
 
     auto on_handle_create(Event& write_event) -> void override {
+        this->write_event = &write_event;
+    }
+
+    auto on_handle_update(Event& write_event) -> void override {
         this->write_event = &write_event;
     }
 
@@ -131,6 +136,10 @@ class KeyboardDevice : public Device {
 
     auto on_handle_create(Event& write_event) -> void override {
         active            = true;
+        this->write_event = &write_event;
+    }
+
+    auto on_handle_update(Event& write_event) -> void override {
         this->write_event = &write_event;
     }
 
@@ -391,6 +400,15 @@ class Driver : public fs::Driver {
 
         auto& device = *reinterpret_cast<Device*>(info.get_driver_data());
         device.on_handle_create(write_event);
+    }
+
+    auto on_handle_update(OpenInfo& info, Event& write_event) -> void override {
+        if(info.get_driver_data() == 0) {
+            return;
+        }
+
+        auto& device = *reinterpret_cast<Device*>(info.get_driver_data());
+        device.on_handle_update(write_event);
     }
 
     auto on_handle_destroy(OpenInfo& info) -> void override {

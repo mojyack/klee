@@ -150,7 +150,7 @@ class Handle {
         data        = o.data;
         mode        = o.mode;
         write_event = std::move(o.write_event);
-        data->on_handle_create(write_event);
+        data->on_handle_update(write_event);
         return *this;
     }
 

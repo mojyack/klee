@@ -75,6 +75,7 @@ class OpenInfo {
 
     // used by Handle
     auto on_handle_create(Event& write_event) -> void;
+    auto on_handle_update(Event& write_event) -> void;
     auto on_handle_destroy() -> void;
 
     // used by Controller
@@ -188,6 +189,7 @@ class Driver {
     }
 
     virtual auto on_handle_create(OpenInfo& info, Event& write_event) -> void {}
+    virtual auto on_handle_update(OpenInfo& info, Event& write_event) -> void {}
     virtual auto on_handle_destroy(OpenInfo& info) -> void {}
 
     virtual auto get_root() -> OpenInfo& = 0;
@@ -278,6 +280,10 @@ inline auto OpenInfo::control_device(const DeviceOperation op, void* const arg) 
 
 inline auto OpenInfo::on_handle_create(Event& write_event) -> void {
     driver->on_handle_create(*this, write_event);
+}
+
+inline auto OpenInfo::on_handle_update(Event& write_event) -> void {
+    driver->on_handle_update(*this, write_event);
 }
 
 inline auto OpenInfo::on_handle_destroy() -> void {
