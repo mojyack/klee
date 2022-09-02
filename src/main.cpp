@@ -10,12 +10,12 @@
 #include "paging.hpp"
 #include "segment.hpp"
 #include "syscall.hpp"
+#include "task/task-impl.hpp"
 #include "terminal.hpp"
 #include "timer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
-#include "task/task-impl.hpp"
 
 class Kernel {
   private:
@@ -91,6 +91,12 @@ class Kernel {
         // initialize acpi
         if(!acpi::initialize(rsdp)) {
             return;
+        }
+        if(acpi::madt != nullptr) {
+            const auto cores = acpi::detect_cores();
+            for(auto i = 0; i < cores.lapic_ids.size(); i += 1) {
+                logger(LogLevel::Info, "acpi: cpu core %d detected: lapic_id = %u\n", i, cores.lapic_ids[i]);
+            }
         }
 
         // start timer

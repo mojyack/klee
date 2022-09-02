@@ -72,6 +72,7 @@ run: run_prep
 	-machine type=q35,accel=kvm \
 	-bios ovmf/OVMF.fd \
 	-cpu host,kvm=off \
+	-smp cores=2,threads=2,sockets=1,maxcpus=4 \
 	-display sdl \
 	-enable-kvm \
 	-m 512M \
@@ -93,6 +94,7 @@ run_debug: run_prep
 	-machine type=q35,accel=kvm \
 	-bios ovmf/OVMF.fd \
 	-cpu host,kvm=off \
+	-smp cores=2,threads=2,sockets=1,maxcpus=4 \
 	-display sdl \
 	-m 512M \
 	-boot order=c \

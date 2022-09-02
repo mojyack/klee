@@ -1,4 +1,6 @@
 #pragma once
+#include <vector>
+
 #include "io.hpp"
 #include "log.hpp"
 
@@ -64,11 +66,9 @@ struct DescriptionHeader {
 
     auto is_valid(const char* const expected_signature) const -> bool {
         if(strncmp(signature, expected_signature, 4) != 0) {
-            logger(LogLevel::Error, "invalid signature %.4s\n", signature);
             return false;
         }
         if(const auto sum = internal::sum_bytes(this, length); sum != 0) {
-            logger(LogLevel::Error, "checksum not matched (%d != 0)\n", sum);
             return false;
         }
         return true;
@@ -76,15 +76,11 @@ struct DescriptionHeader {
 } __attribute__((packed));
 
 struct XSDT {
-    DescriptionHeader header;
+    DescriptionHeader  header;
+    DescriptionHeader* entries[];
 
     auto get_count() const -> size_t {
-        return (header.length - sizeof(DescriptionHeader)) / sizeof(uint64_t);
-    }
-
-    auto operator[](const size_t i) const -> const DescriptionHeader& {
-        const auto entries = reinterpret_cast<const uint64_t*>(&header + 1);
-        return *reinterpret_cast<const DescriptionHeader*>(entries[i]);
+        return (header.length - sizeof(XSDT)) / sizeof(void*);
     }
 } __attribute__((packed));
 
@@ -98,7 +94,83 @@ struct FADT {
     char     reserved3[276 - 116];
 } __attribute__((packed));
 
+struct MADT {
+    struct Entry {
+        enum Type : uint8_t {
+            LAPIC                            = 0,
+            IOAPIC                           = 1,
+            IOAPICInterruptSourceOverride    = 2,
+            IOAPICNonMaskableInterruptSource = 3,
+            LAPICNonMaskableInterruptSource  = 4,
+            LAPICAddressOverride             = 5,
+            ProcessorLx2APIC                 = 9,
+        };
+
+        struct LAPICValue {
+            uint8_t processor_id;
+            uint8_t apic_id;
+            union {
+                uint32_t data;
+                struct {
+                    uint32_t enabled : 1;
+                    uint32_t online_capable : 1;
+                } bits;
+            } __attribute__((packed)) flags;
+        } __attribute__((packed));
+
+        struct IOAPICValue {
+            uint8_t  io_apic_id;
+            uint8_t  reserved;
+            uint32_t io_apic_address;
+            uint32_t global_system_interrupt_base;
+        } __attribute__((packed));
+
+        struct IOAPICInterruptSourceOverrideValue {
+            uint8_t  bus_source;
+            uint8_t  irq_source;
+            uint32_t global_system_interrupt;
+            uint16_t flags;
+        } __attribute__((packed));
+
+        struct IOAPICNonMaskableInterruptSourceValue {
+            uint8_t  nmi_source;
+            uint8_t  reserved;
+            uint16_t flags;
+            uint32_t global_system_interrupt;
+        } __attribute__((packed));
+
+        struct LAPICNonMaskableInterruptSourceValue {
+            uint8_t  acpi_processor_id;
+            uint16_t flags;
+            uint8_t  lint;
+        } __attribute__((packed));
+
+        struct LAPICAddressOverrideValue {
+            uint16_t reserved;
+            uint64_t lapic_address;
+        } __attribute__((packed));
+
+        struct ProcessorLx2APICValue {
+            uint16_t reserved;
+            uint32_t lx2apic_id;
+            uint32_t flags;
+            uint32_t apic_id;
+        } __attribute__((packed));
+
+        Type    type;
+        uint8_t length;
+        uint8_t value; // struct xValue;
+    } __attribute__((packed));
+
+    DescriptionHeader header;
+
+    uint32_t lapic_address;
+    uint32_t flags;
+    uint8_t  entries; // Entries[];
+} __attribute__((packed));
+
 inline auto fadt = (const FADT*)(nullptr);
+inline auto madt = (const MADT*)(nullptr);
 
 inline auto wait_miliseconds(const uint64_t ms) -> void {
     constexpr auto pm_timer_freq = 3579545;
@@ -133,10 +205,11 @@ inline auto initialize(RSDP& rsdp) -> bool {
     }
 
     for(auto i = 0; i < xsdt.get_count(); i += 1) {
-        const auto& e = xsdt[i];
+        const auto& e = *xsdt.entries[i];
         if(e.is_valid("FACP")) {
             fadt = reinterpret_cast<const FADT*>(&e);
-            break;
+        } else if(e.is_valid("APIC")) {
+            madt = reinterpret_cast<const MADT*>(&e);
         }
     }
 
@@ -145,6 +218,43 @@ inline auto initialize(RSDP& rsdp) -> bool {
         return false;
     }
 
+    if(madt == nullptr) {
+        logger(LogLevel::Error, "MADT not found\n");
+        return false;
+    }
+
     return true;
+}
+
+struct DetectCoreResult {
+    std::vector<uint8_t> lapic_ids;
+    uintptr_t            lapic_address;
+    uintptr_t            ioapic_address = 0;
+};
+
+inline auto detect_cores() -> DetectCoreResult {
+    auto r = DetectCoreResult{.lapic_address = madt->lapic_address};
+    for(auto p = &madt->entries; p < reinterpret_cast<const uint8_t*>(madt) + madt->header.length; p += reinterpret_cast<const MADT::Entry*>(p)->length) {
+        const auto& e = *reinterpret_cast<const MADT::Entry*>(p);
+        switch(e.type) {
+        case MADT::Entry::Type::LAPIC: {
+            const auto& v = *reinterpret_cast<const MADT::Entry::LAPICValue*>(&e.value);
+            if(v.flags.bits.enabled) {
+                r.lapic_ids.emplace_back(v.apic_id);
+            }
+        } break;
+        case MADT::Entry::Type::IOAPIC: {
+            const auto& v    = *reinterpret_cast<const MADT::Entry::IOAPICValue*>(&e.value);
+            r.ioapic_address = v.io_apic_address;
+        } break;
+        case MADT::Entry::Type::LAPICAddressOverride: {
+            const auto& v    = *reinterpret_cast<const MADT::Entry::LAPICAddressOverrideValue*>(&e.value);
+            r.ioapic_address = v.lapic_address;
+        } break;
+        default:
+            break;
+        }
+    }
+    return r;
 }
 } // namespace acpi
