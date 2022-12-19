@@ -1,8 +1,7 @@
 SHELL = /bin/zsh
-LLVM_VERSION = 14.0.4
 TARGET = x86_64-elf
 INCLUDES = $(addprefix -I, $(BUILDENV)/include $(BUILDENV)/include/freetype2 $(BUILDENV)/include/c++/v1 $(abspath edk2/MdePkg/Include) $(abspath edk2/MdePkg/Include/X64))
-COMMON_FLAGS = -O3 -Wall --target=$(TARGET) -nostdlibinc -ffreestanding -U__linux__ -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
+COMMON_FLAGS = -O3 -Wall --target=$(TARGET) -nostdlibinc -ffreestanding -mlong-double-64 -U__linux__ -D__ELF__ -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
 CXX = clang++ -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 -Wno-address-of-packed-member -march=x86-64-v2 $(INCLUDES) $(COMMON_FLAGS) -c
 LIBRARY = $(BUILDENV)/lib
 
@@ -67,46 +66,7 @@ run_prep: out/volume out/loader.efi out/kernel.elf apps ovmf/OVMF.fd
 	scripts/copyfiles.sh out/volume out/root
 
 run: run_prep
-	SDL_VIDEODRIVER=wayland \
-	qemu-system-x86_64 \
-	-machine type=q35,accel=kvm \
-	-bios ovmf/OVMF.fd \
-	-cpu host,kvm=off \
-	-smp cores=2,threads=2,sockets=1,maxcpus=4 \
-	-display sdl \
-	-enable-kvm \
-	-m 512M \
-	-boot order=c \
-	-device virtio-gpu,xres=1280,yres=1024 \
-	-drive file=out/volume,index=0,media=disk,format=raw \
-	-device qemu-xhci \
-	-device usb-mouse -device usb-kbd \
-	-nic none \
-	-monitor stdio \
-	-d guest_errors \
-	-d int \
-	-no-reboot -no-shutdown
-	#-vga virtio \
-
-run_debug: run_prep
-	SDL_VIDEODRIVER=wayland \
-	qemu-system-x86_64 \
-	-machine type=q35,accel=kvm \
-	-bios ovmf/OVMF.fd \
-	-cpu host,kvm=off \
-	-smp cores=2,threads=2,sockets=1,maxcpus=4 \
-	-display sdl \
-	-m 512M \
-	-boot order=c \
-	-device virtio-gpu,xres=1280,yres=1024 \
-	-drive file=out/volume,index=0,media=disk,format=raw \
-	-device qemu-xhci \
-	-device usb-mouse -device usb-kbd \
-	-nic none \
-	-d int \
-	-no-reboot -no-shutdown \
-	-gdb tcp::8080 -S & \
-	lldb out/kernel.elf
+	scripts/run-qemu.sh
 
 clean:
 	rm -r out
