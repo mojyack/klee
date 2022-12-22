@@ -9,10 +9,10 @@ args=(
     -m 512M
 
     -bios ovmf/OVMF.fd
-    -display sdl
+    -display gtk
 
     -boot order=c
-    -device virtio-gpu,xres=1280,yres=1024
+    -device virtio-gpu,xres=800,yres=600
     -drive file=out/volume,index=0,media=disk,format=raw
     -device qemu-xhci
     -device usb-mouse -device usb-kbd
