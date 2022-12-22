@@ -225,7 +225,7 @@ struct Device {
         msi_cap.msg_data               = msg_data;
 
         write_msi_capability(cap_addr, msi_cap);
-        return Error::Code::Success;
+        return Success();
     }
 
     auto configure_msix_register(const uint8_t cap_addr, const uint32_t msg_addr, const uint32_t msg_data, const unsigned int entry_number) const -> Error {
@@ -251,7 +251,7 @@ struct Device {
 
         msix_cap.header.bits.msix_enable = 1;
         write_msix_capability(cap_addr, msix_cap);
-        return Error::Code::Success;
+        return Success();
     }
 
   public:
@@ -359,7 +359,7 @@ class Devices {
         }
         data[size] = device;
         size += 1;
-        return Error::Code::Success;
+        return Success();
     }
 
     auto scan_function(const uint8_t bus, const uint8_t dev, const uint8_t fn) -> Error {
@@ -377,7 +377,7 @@ class Devices {
             const auto secondary_bus = (bus_numbers >> 8) & 0xFFu;
             return scan_bus(secondary_bus);
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     auto scan_device(const uint8_t bus, const uint8_t dev) -> Error {
@@ -386,7 +386,7 @@ class Devices {
         }
 
         if(is_single_function_device(read_header_type(bus, dev, 0))) {
-            return Error::Code::Success;
+            return Success();
         }
 
         for(auto fn = uint8_t(1); fn < 8; fn += 1) {
@@ -398,7 +398,7 @@ class Devices {
             }
         }
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto scan_bus(const uint8_t bus) -> Error {
@@ -411,7 +411,7 @@ class Devices {
             }
         }
 
-        return Error::Code::Success;
+        return Success();
     }
 
   public:
@@ -431,7 +431,7 @@ class Devices {
             }
         }
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto get_devices() const -> std::pair<size_t, const decltype(data)&> {

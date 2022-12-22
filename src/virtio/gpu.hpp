@@ -349,7 +349,7 @@ class GPUDevice {
                 }
             }
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     auto create_devfs_framebuffer() -> std::unique_ptr<Framebuffer> {

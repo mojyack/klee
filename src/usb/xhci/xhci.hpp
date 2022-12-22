@@ -26,7 +26,7 @@ inline auto register_command_ring(Ring* const ring, MemoryMappedRegister<CRCRBit
     value.bits.command_abort    = false;
     value.set_pointer(reinterpret_cast<uint64_t>(ring->get_buffer()));
     crcr->write(value);
-    return Error::Code::Success;
+    return Success();
 }
 
 inline auto port_config_phase = std::array<volatile ConfigPhase, 256>(); // index: port number
@@ -77,7 +77,7 @@ inline auto initialize_ep0_context(EndpointContext& ctx, Ring* const transfer_ri
 inline auto reset_port(Port& port) -> Error {
     const auto is_connected = port.is_connected();
     if(!is_connected) {
-        return Error::Code::Success;
+        return Success();
     }
 
     if(addressing_port != 0) {
@@ -93,7 +93,7 @@ inline auto reset_port(Port& port) -> Error {
             return e;
         }
     }
-    return Error::Code::Success;
+    return Success();
 }
 
 inline auto request_hc_ownership(const uintptr_t mmio_base, const HCCPARAMS1Bitmap hccp) -> void {
@@ -156,7 +156,7 @@ class Controller {
             get_command_ring()->push(cmd);
             get_doorbell_register_at(0)->ring(0);
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     auto address_device(const uint8_t port_id, const uint8_t slot_id) -> Error {
@@ -194,7 +194,7 @@ class Controller {
         cr.push(addr_dev_cmd);
         get_doorbell_register_at(0)->ring(0);
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto initialize_device(const uint8_t port_id, const uint8_t slot_id) -> Error {
@@ -208,7 +208,7 @@ class Controller {
             return e;
         }
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto complete_configuration(const uint8_t port_id, const uint8_t slot_id) -> Error {
@@ -222,7 +222,7 @@ class Controller {
         }
 
         internal::port_config_phase[port_id] = internal::ConfigPhase::Configured;
-        return Error::Code::Success;
+        return Success();
     }
 
     auto on_event(PortStatusChangeEventTRB& trb) -> Error {
@@ -254,7 +254,7 @@ class Controller {
         if(dev->is_initialized() && internal::port_config_phase[port_id] == internal::ConfigPhase::InitializingDevice) {
             return configure_endpoints(*dev);
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     auto on_event(CommandCompletionEventTRB& trb) -> Error {
@@ -392,7 +392,7 @@ class Controller {
         usbcmd.bits.interrupter_enable = true;
         op->usbcmd.write(usbcmd);
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto run() -> Error {
@@ -404,7 +404,7 @@ class Controller {
             //
         }
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto get_command_ring() -> Ring* {
@@ -431,7 +431,7 @@ class Controller {
         if(internal::port_config_phase[port.get_number()] == internal::ConfigPhase::NotConnected) {
             return internal::reset_port(port);
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     auto configure_endpoints(Device& dev) -> Error {
@@ -495,7 +495,7 @@ class Controller {
         cr.push(cmd);
         get_doorbell_register_at(0)->ring(0);
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto has_unprocessed_event() const -> bool {
@@ -504,7 +504,7 @@ class Controller {
 
     auto process_event() -> Error {
         if(!has_unprocessed_event()) {
-            return Error::Code::Success;
+            return Success();
         }
 
         auto       error     = Error(Error::Code::NotImplemented);

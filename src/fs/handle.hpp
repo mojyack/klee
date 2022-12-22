@@ -39,7 +39,7 @@ inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
         info->write_count += 1;
     }
 
-    return Error();
+    return Success();
 }
 
 class Controller;
@@ -105,7 +105,7 @@ class Handle {
             return Error::Code::FileNotOpened;
         }
         const auto r = data->create(name, type);
-        return r ? Error() : r.as_error();
+        return r ? Success() : r.as_error();
     }
 
     auto readdir(const size_t index) -> Result<OpenInfo> {
@@ -277,7 +277,7 @@ class Controller {
         auto handle        = std::move(open_result.as_value());
         handle.data->mount = volume_root;
         mountpoints.emplace_back(std::move(handle));
-        return Error();
+        return Success();
     }
 
     auto unmount(const std::string_view path) -> Result<const Driver*> {

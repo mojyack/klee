@@ -34,7 +34,7 @@ class DummyBlockDevice : public BlockDevice {
             return Error::Code::IOError;
         }
 
-        return Error();
+        return Success();
     }
 
     auto write_file(const size_t sector, const uint8_t* const buffer) -> Error {
@@ -49,7 +49,7 @@ class DummyBlockDevice : public BlockDevice {
             return Error::Code::IOError;
         }
 
-        return Error();
+        return Success();
     }
 
   public:
@@ -63,7 +63,7 @@ class DummyBlockDevice : public BlockDevice {
             error_or(read_file(s, static_cast<uint8_t*>(buffer) + sector_size * i));
         }
 
-        return Error();
+        return Success();
     }
 
     auto write_sector(size_t sector, size_t count, const void* buffer) -> Error override {
@@ -72,7 +72,7 @@ class DummyBlockDevice : public BlockDevice {
             error_or(write_file(s, static_cast<const uint8_t*>(buffer) + sector_size * i));
         }
 
-        return Error();
+        return Success();
     }
 
     DummyBlockDevice(const std::string_view path) {

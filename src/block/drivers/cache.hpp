@@ -44,7 +44,7 @@ class Device : public fs::dev::BlockDevice {
             std::memcpy(static_cast<uint8_t*>(buffer) + bytes_per_sector * i, cache.data.get(), bytes_per_sector);
         }
 
-        return Error();
+        return Success();
     }
 
     auto write_sector(size_t sector, size_t count, const void* buffer) -> Error override {
@@ -61,7 +61,7 @@ class Device : public fs::dev::BlockDevice {
             std::memcpy(cache.data.get(), static_cast<const uint8_t*>(buffer) + bytes_per_sector * i, bytes_per_sector);
         }
 
-        return Error();
+        return Success();
     }
 
   public:

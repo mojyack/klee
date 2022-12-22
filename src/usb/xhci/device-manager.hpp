@@ -29,7 +29,7 @@ class DeviceManager {
             device_contexts[i] = nullptr;
         }
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto get_device_contexts() const -> DeviceContext** {
@@ -83,7 +83,7 @@ class DeviceManager {
             return Error::Code::NoEnoughMemory;
         }
         devices[slot_id] = new_device;
-        return Error::Code::Success;
+        return Success();
     }
 
     auto load_dcbaa(const uint8_t slot_id) -> Error {
@@ -93,14 +93,14 @@ class DeviceManager {
 
         const auto dev           = devices[slot_id];
         device_contexts[slot_id] = dev->get_device_context();
-        return Error::Code::Success;
+        return Success();
     }
 
     auto remove(const uint8_t slot_id) -> Error {
         device_contexts[slot_id] = nullptr;
         delete devices[slot_id];
         devices[slot_id] = nullptr;
-        return Error::Code::Success;
+        return Success();
     }
 
     auto operator=(DeviceManager&) -> DeviceManager& = delete;

@@ -43,7 +43,7 @@ class Ring {
             return Error::Code::NoEnoughMemory;
         }
         memset(buffer.get(), 0, buffer_count * sizeof(TRB));
-        return Error::Code::Success;
+        return Success();
     }
 
     template <typename T>
@@ -115,7 +115,7 @@ class EventRing {
         erstba.set_pointer(std::bit_cast<uint64_t>(entry.get()));
         interrupter->erstba.write(erstba);
 
-        return Error::Code::Success;
+        return Success();
     }
 
     auto read_dequeue_pointer() const -> TRB* {

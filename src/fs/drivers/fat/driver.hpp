@@ -28,7 +28,7 @@ class BlockDevice {
   public:
     auto init() -> Error {
         error_or(handle.control_device(fs::DeviceOperation::GetBytesPerSector, &bytes_per_sector));
-        return Error();
+        return Success();
     }
 
     auto get_bytes_per_sector() const -> size_t {
@@ -39,14 +39,14 @@ class BlockDevice {
         if(const auto r = handle.read(sector * bytes_per_sector, count * bytes_per_sector, buffer); !r) {
             return r.as_error();
         }
-        return Error();
+        return Success();
     }
 
     auto write_sector(const size_t sector, const size_t count, const void* const buffer) -> Error {
         if(const auto r = handle.write(sector * bytes_per_sector, count * bytes_per_sector, buffer); !r) {
             return r.as_error();
         }
-        return Error();
+        return Success();
     }
 
     BlockDevice(fs::Handle handle) : handle(std::move(handle)) {}
@@ -135,7 +135,7 @@ class DirectoryIterator {
   public:
     auto skip(const size_t count) -> Error {
         if(count == 0) {
-            return Error();
+            return Success();
         }
 
         const auto cluster_size_bytes         = op.get_cluster_size_bytes();
@@ -161,7 +161,7 @@ class DirectoryIterator {
 
                 count_current += 1;
                 if(count_current == count) {
-                    return Error();
+                    return Success();
                 }
             }
 
@@ -260,7 +260,7 @@ class Driver : public fs::Driver {
         this->bpb  = bpb.summary();
         this->root = OpenInfo("/", *this, this->bpb.root_cluster, FileType::Directory, true);
 
-        return Error();
+        return Success();
     }
 
     auto read(OpenInfo& info, const size_t offset, size_t size, void* const buffer_) -> Result<size_t> override {

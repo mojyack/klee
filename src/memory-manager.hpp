@@ -115,7 +115,7 @@ class BitmapMemoryManager {
 
     auto deallocate(const FrameID begin, const size_t frames) -> Error {
         set_bits(begin, frames, false);
-        return Error::Code::Success;
+        return Success();
     }
 
     auto is_available(const size_t address) -> bool {
@@ -137,7 +137,7 @@ class BitmapMemoryManager {
 
         program_break     = reinterpret_cast<caddr_t>(heap_start.as_value().get_id() * bytes_per_frame);
         program_break_end = program_break + heap_frames * bytes_per_frame;
-        return Error::Code::Success;
+        return Success();
     }
 
 #if MM_DEBUG_PRINT == 1

@@ -101,7 +101,7 @@ class Device {
         }
 
         if(class_driver == nullptr) {
-            return Error::Code::Success;
+            return Success();
         }
         initialize_phase = 3;
         return set_configuration(default_control_pipe_id, cfg_desc->configuration_value);
@@ -115,7 +115,7 @@ class Device {
         }
         initialize_phase = 4;
         initialized      = true;
-        return Error::Code::Success;
+        return Success();
     }
 
     auto get_descriptor(const EndpointID id, const uint8_t type, const uint8_t index, void* const buf, const int len) -> Error {
@@ -216,22 +216,22 @@ class Device {
         if(issuer != nullptr) {
             event_waiters[setup_data] = issuer;
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     virtual auto control_out(const EndpointID id, const SetupData setup_data, void* const buf, const int len, ClassDriver* const issuer) -> Error {
         if(issuer != nullptr) {
             event_waiters[setup_data] = issuer;
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     virtual auto interrupt_in(const EndpointID id, void* const buf, const int len) -> Error {
-        return Error::Code::Success;
+        return Success();
     }
 
     virtual auto interrupt_out(const EndpointID id, void* const buf, const int len) -> Error {
-        return Error::Code::Success;
+        return Success();
     }
 
     auto start_initializing() -> Error {
@@ -257,7 +257,7 @@ class Device {
                 return error;
             }
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     Device() {

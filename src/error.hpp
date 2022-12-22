@@ -85,7 +85,12 @@ class [[nodiscard]] Error {
     Error(const Code code) : code(code) {}
 };
 
-constexpr auto success = Error::Code::Success;
+class Success {
+  public:
+    operator Error() {
+        return Error::Code::Success;
+    }
+};
 
 template <class T>
 class Result {

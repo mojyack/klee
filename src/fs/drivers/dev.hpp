@@ -317,7 +317,7 @@ class Driver : public fs::Driver {
 
         if(const auto p = devices.find(std::string(name)); p != devices.end()) {
             devices.erase(p);
-            return Error();
+            return Success();
         } else {
             return Error::Code::NoSuchFile;
         }
@@ -390,7 +390,7 @@ class Driver : public fs::Driver {
             }
         } break;
         }
-        return Error();
+        return Success();
     }
 
     auto on_handle_create(OpenInfo& info, Event& write_event) -> void override {

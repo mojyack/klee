@@ -69,7 +69,7 @@ class FilesystemManager {
             break;
         }
 
-        return Error();
+        return Success();
     }
 
     auto get_mounts() const -> std::vector<std::array<std::string, 2>> {
@@ -98,7 +98,7 @@ class FilesystemManager {
                 error_or(create_device_file({buf.data(), size_t(len)}, p.device.get()));
             }
         }
-        return Error();
+        return Success();
     }
 
     // just a helper
@@ -112,7 +112,7 @@ class FilesystemManager {
         auto& dev = open_result.as_value();
         dev.create_device(name, reinterpret_cast<uintptr_t>(device_impl));
         root.close(std::move(dev));
-        return Error();
+        return Success();
     }
 };
 
@@ -138,7 +138,7 @@ inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
         auto [lock, man] = manager->access();
         // TODO
         // pass exit code
-        [[maybe_unused]] const auto exit_code = man.set_sata_devices(std::move(sata_devices)) == success;
+        [[maybe_unused]] const auto exit_code = man.set_sata_devices(std::move(sata_devices)).as_int();
     }
 
     task::manager->get_current_task().exit();

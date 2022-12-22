@@ -27,6 +27,6 @@ inline auto FilesystemManager::mount(const std::string_view device, const std::s
     }
 
     mount_records.emplace_back(std::string(device), std::string(mountpoint), fs_driver, shared_driver);
-    return Error();
+    return Success();
 }
 } // namespace fs

@@ -27,7 +27,7 @@ inline auto Task::init_context(TaskEntry* const func, const int64_t data) -> Err
     // mask all exceptions of MXCSR
     *reinterpret_cast<uint32_t*>(&context.fxsave_area[24]) = 0x1f80;
 
-    return Error();
+    return Success();
 }
 
 inline auto Task::send_message(Message message) -> void {

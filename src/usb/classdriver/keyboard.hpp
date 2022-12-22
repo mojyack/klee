@@ -35,7 +35,7 @@ class HIDKeyboardDriver : public HIDBaseDriver {
             }
             notify_keypush(get_buffer()[0], key);
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     auto subscribe_keypush(const std::function<ObserverType> observer) -> void {

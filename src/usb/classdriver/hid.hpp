@@ -11,7 +11,7 @@ inline auto HIDBaseDriver::set_endpoint(const EndpointConfig& config) -> Error {
     if(config.type == EndpointType::Interrupt) {
         (config.id.is_in() ? interrupt_in : interrupt_out) = config.id;
     }
-    return Error::Code::Success;
+    return Success();
 }
 
 inline auto HIDBaseDriver::on_endpoint_configured() -> Error {

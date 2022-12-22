@@ -107,7 +107,7 @@ class File : public Object {
             data.resize(new_data_size);
         }
         filesize = new_size;
-        return Error();
+        return Success();
     }
 
     auto get_size() const -> size_t {
@@ -226,7 +226,7 @@ class Driver : public fs::Driver {
         if(!dir->remove(name)) {
             return Error::Code::NoSuchFile;
         }
-        return Error();
+        return Success();
     }
 
     auto get_root() -> OpenInfo& override {

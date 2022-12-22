@@ -309,7 +309,7 @@ class TaskManager {
             return Error::Code::NoSuchTask;
         }
         sleep(it->get());
-        return Error::Code::Success;
+        return Success();
     }
 
     auto wakeup(Task* const task, const int nice = -1) -> void {

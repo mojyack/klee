@@ -27,7 +27,7 @@ class HIDMouseDriver : public HIDBaseDriver {
         const auto displacement_x = get_buffer()[1];
         const auto displacement_y = get_buffer()[2];
         notify_mousemove(buttons, displacement_x, displacement_y);
-        return Error::Code::Success;
+        return Success();
     }
 
     auto subscribe_mousemove(const std::function<ObserverType> observer) -> void {

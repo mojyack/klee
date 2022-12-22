@@ -50,7 +50,7 @@ class Port {
         while(port_reg_set.portsc.read().bits.port_reset) {
             //
         }
-        return Error::Code::Success;
+        return Success();
     }
 
     auto initialize() -> Device* {

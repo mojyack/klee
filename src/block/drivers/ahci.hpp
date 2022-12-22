@@ -14,7 +14,7 @@ class Device : public fs::dev::BlockDevice {
             return Error::Code::IOError;
         }
         event.wait();
-        return Error();
+        return Success();
     }
 
     auto write_sector(size_t sector, size_t count, const void* const buffer) -> Error override {
@@ -23,7 +23,7 @@ class Device : public fs::dev::BlockDevice {
             return Error::Code::IOError;
         }
         event.wait();
-        return Error();
+        return Success();
     }
 
     auto get_info() const -> DeviceInfo {
