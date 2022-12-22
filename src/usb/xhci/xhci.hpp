@@ -89,7 +89,9 @@ inline auto reset_port(Port& port) -> Error {
         }
         addressing_port                      = port.get_number();
         port_config_phase[port.get_number()] = ConfigPhase::ResettingPort;
-        port.reset();
+        if(const auto e = port.reset()) {
+            return e;
+        }
     }
     return Error::Code::Success;
 }
@@ -176,9 +178,15 @@ class Controller {
         auto port = get_port_at(port_id);
         internal::initialize_slot_context(*slot_ctx, port);
 
-        internal::initialize_ep0_context(*ep0_ctx, dev->allocate_transfer_ring(ep0_dci, 32), internal::determine_max_packet_size_for_control_pipe(slot_ctx->bits.speed));
+        const auto transfer_ring = dev->allocate_transfer_ring(ep0_dci, 32);
+        if(!transfer_ring) {
+            return transfer_ring.as_error();
+        }
+        internal::initialize_ep0_context(*ep0_ctx, transfer_ring.as_value(), internal::determine_max_packet_size_for_control_pipe(slot_ctx->bits.speed));
 
-        device_manager.load_dcbaa(slot_id);
+        if(const auto e = device_manager.load_dcbaa(slot_id)) {
+            return e;
+        }
 
         internal::port_config_phase[port_id] = internal::ConfigPhase::AddressingDevice;
 
@@ -196,7 +204,9 @@ class Controller {
         }
 
         internal::port_config_phase[port_id] = internal::ConfigPhase::InitializingDevice;
-        dev->start_initializing();
+        if(const auto e = dev->start_initializing()) {
+            return e;
+        }
 
         return Error::Code::Success;
     }
@@ -207,7 +217,9 @@ class Controller {
             return Error::Code::InvalidSlotID;
         }
 
-        dev->on_endpoint_configured();
+        if(const auto e = dev->on_endpoint_configured()) {
+            return e;
+        }
 
         internal::port_config_phase[port_id] = internal::ConfigPhase::Configured;
         return Error::Code::Success;
@@ -466,7 +478,10 @@ class Controller {
             ep_ctx->bits.average_trb_length = 1;
 
             const auto tr = dev.allocate_transfer_ring(ep_dci, 32);
-            ep_ctx->set_transfer_ring_buffer(tr->get_buffer());
+            if(!tr) {
+                return tr.as_error();
+            }
+            ep_ctx->set_transfer_ring_buffer(tr.as_value()->get_buffer());
 
             ep_ctx->bits.dequeue_cycle_state = 1;
             ep_ctx->bits.max_primary_streams = 0;

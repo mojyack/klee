@@ -4,6 +4,7 @@
 #include "../error.hpp"
 #include "../mutex-like.hpp"
 #include "../util/container-of.hpp"
+#include "../panic.hpp"
 #include "task.hpp"
 
 extern "C" uint64_t self_task_system_stack;
@@ -385,7 +386,7 @@ class TaskManager {
         running[current_nice].push_back(&task);
 
         auto& idle = new_managed_task();
-        idle.task.init_context(idle_main, 0);
+        fatal_assert(!idle.task.init_context(idle_main, 0), "failed to init context of the idle process");
         idle.nice    = max_nice;
         idle.running = true;
         running[max_nice].push_back(&idle);

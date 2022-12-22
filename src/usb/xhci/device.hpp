@@ -81,11 +81,13 @@ class Device final : public usb::Device {
         state = State::SlotAssigning;
     }
 
-    auto allocate_transfer_ring(const DeviceContextIndex index, const size_t buffer_count) -> Ring* {
+    auto allocate_transfer_ring(const DeviceContextIndex index, const size_t buffer_count) -> Result<Ring*> {
         const auto i  = index.value - 1;
         const auto tr = new(std::nothrow) Ring;
         if(tr != nullptr) {
-            tr->initialize(buffer_count);
+            if(const auto e = tr->initialize(buffer_count)) {
+                return e;
+            }
         }
         transfer_rings[i] = tr;
         return tr;

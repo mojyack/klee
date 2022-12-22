@@ -109,7 +109,9 @@ class Device {
 
     auto initialize_phase3(const uint8_t value) -> Error {
         for(auto i = size_t(0); i < endpoint_configs_size; i += 1) {
-            class_drivers[endpoint_configs[i].id.get_number()]->set_endpoint(endpoint_configs[i]);
+            if(const auto e = class_drivers[endpoint_configs[i].id.get_number()]->set_endpoint(endpoint_configs[i])) {
+                return e;
+            }
         }
         initialize_phase = 4;
         initialized      = true;

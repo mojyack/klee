@@ -242,7 +242,7 @@ class Controller {
         return result;
     }
 
-    auto close(Handle handle) -> Error {
+    auto close(Handle handle) -> void {
         auto node = handle.data;
         switch(handle.mode) {
         case OpenMode::Read:
@@ -266,7 +266,6 @@ class Controller {
             node->parent->children.erase(node->name);
             node = node->parent;
         }
-        return Error();
     }
 
     auto mount(const std::string_view path, Driver& driver) -> Error {
@@ -289,7 +288,7 @@ class Controller {
             mountpoint = node;
         } else {
             value_or(parent, open_parent_directory(elms, OpenMode::Read));
-            error_or(close(std::move(parent)));
+            close(std::move(parent));
             auto& children = parent.data->children;
             if(const auto p = children.find(std::string(elms.back())); p == children.end()) {
                 return Error::Code::NoSuchFile;
@@ -310,11 +309,7 @@ class Controller {
             }
             mountpoint->mount = nullptr;
 
-            if(const auto e = close(std::move(*m))) {
-                logger(LogLevel::Error, "failed to close mountpoint, this is kernel bug: %d\n", e.as_int());
-                mountpoints.erase(m);
-                return e;
-            }
+            close(std::move(*m));
             mountpoints.erase(m);
             return volume_root->read_driver();
         }

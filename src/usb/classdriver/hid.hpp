@@ -42,7 +42,9 @@ inline auto HIDBaseDriver::on_interrupt_completed(const EndpointID id, const voi
     if(!id.is_in()) {
         return Error::Code::NotImplemented;
     }
-    on_data_received();
+    if(const auto e = on_data_received()) {
+        return e;
+    }
     std::copy_n(buffer.begin(), len, prev_buffer.begin());
     return get_owner_device()->interrupt_in(interrupt_in, buffer.data(), in_packet_size);
 }

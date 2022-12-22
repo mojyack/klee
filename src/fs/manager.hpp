@@ -136,7 +136,9 @@ inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
         }
 
         auto [lock, man] = manager->access();
-        man.set_sata_devices(std::move(sata_devices));
+        // TODO
+        // pass exit code
+        [[maybe_unused]] const auto exit_code = man.set_sata_devices(std::move(sata_devices)) == success;
     }
 
     task::manager->get_current_task().exit();

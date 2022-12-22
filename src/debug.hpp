@@ -129,13 +129,13 @@ inline auto print(const char* const str) -> void {
 }
 
 template <Number T>
-inline auto print(T value) -> void {
+auto print(T value) -> void {
     auto str = itos(value);
     print(std::string_view(str.data(), str.size()));
 }
 
 template <Printable Arg, Printable... Args>
-inline auto print(Arg arg, Args... args) -> void {
+auto print(Arg arg, Args... args) -> void {
     if constexpr(std::is_convertible_v<Arg, std::string_view>) {
         print(std::string_view(arg));
     } else {
@@ -147,7 +147,7 @@ inline auto print(Arg arg, Args... args) -> void {
 }
 
 template <Printable... Args>
-inline auto println(Args... args) -> void {
+auto println(Args... args) -> void {
     print(args...);
 
     constexpr auto line_width = 2;

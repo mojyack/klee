@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "error.hpp"
+#include "panic.hpp"
 #include "libc-support.hpp"
 #include "memory-map.h"
 
@@ -190,7 +191,7 @@ class SmartFrameID {
 
     auto operator=(SmartFrameID&& o) -> SmartFrameID& {
         if(id != nullframe) {
-            allocator->deallocate(id, frames);
+            fatal_assert(!allocator->deallocate(id, frames), "failed to deallocate memory");
         }
 
         id     = o.id;
@@ -215,7 +216,7 @@ class SmartFrameID {
     SmartFrameID(const FrameID id, const size_t frames) : id(id), frames(frames) {}
     ~SmartFrameID() {
         if(id != nullframe) {
-            allocator->deallocate(id, frames);
+            fatal_assert(!allocator->deallocate(id, frames), "failed to deallocate memory");
         }
     }
 };

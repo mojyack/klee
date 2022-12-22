@@ -8,6 +8,7 @@
 #include "memory-map.h"
 #include "mouse.hpp"
 #include "paging.hpp"
+#include "panic.hpp"
 #include "segment.hpp"
 #include "syscall.hpp"
 #include "task/task-impl.hpp"
@@ -47,7 +48,7 @@ class Kernel {
         // setup memory manager
         segment::setup_segments();
         paging::setup_identity_page_table();
-        memory_manager.initialize_heap();
+        fatal_assert(!memory_manager.initialize_heap(), "failed to initialize heap memory");
         allocator = &memory_manager;
 
         // create task manager
@@ -165,7 +166,7 @@ class Kernel {
             switch_ehci_to_xhci(pci, *xhc_dev);
         }
         logger(LogLevel::Debug, "xhc initialize: %d\n", xhc.initialize());
-        xhc.run();
+        fatal_assert(!xhc.run(), "failed to run xhc controller");
 
         // connect usb devices
         auto usb_keyboard = devfs::USBKeyboard();
@@ -201,13 +202,13 @@ class Kernel {
 
         if(sata_controller) {
             auto& disk_finder = task::manager->new_task();
-            disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(sata_controller.get()));
+            fatal_assert(!disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(sata_controller.get())), "failed to init context of the disk finder process");
             disk_finder.wakeup(1);
         }
 
         auto term_arg = terminal::TerminalMainArg{"/dev/fb-uefi0", nullptr};
         auto term     = &task::manager->new_task();
-        term->init_context(terminal::main, reinterpret_cast<int64_t>(&term_arg));
+        fatal_assert(!term->init_context(terminal::main, reinterpret_cast<int64_t>(&term_arg)), "failed to init context of the terminal process");
         term->wakeup();
 
         auto virtio_gpu_framebuffer = std::unique_ptr<virtio::gpu::Framebuffer>();
@@ -246,7 +247,9 @@ class Kernel {
             term_arg.framebuffer_path = "/dev/fb-virtio0";
         } break;
         case MessageType::VirtIOGPUControl:
-            virtio_gpu_device->process_control_queue();
+            if(const auto e = virtio_gpu_device->process_control_queue()) {
+                logger(LogLevel::Error, "failed to process virtio gpu event: ", e.as_int());
+            }
             break;
         case MessageType::VirtIOGPUCursor:
             break;

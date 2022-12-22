@@ -183,7 +183,9 @@ class Driver : public fs::Driver {
 
     auto write(OpenInfo& info, const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> override {
         value_or(file, data_as<File>(info.get_driver_data()));
-        file->resize(offset + size);
+        if(const auto e = file->resize(offset + size)) {
+            return e;
+        }
         return file->write(offset, size, static_cast<const uint8_t*>(buffer));
     }
 

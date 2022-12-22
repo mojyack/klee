@@ -303,10 +303,10 @@ class Shell {
         return result;
     }
 
-    auto close_handle(fs::Handle handle) -> Error {
+    auto close_handle(fs::Handle handle) -> void {
         auto [lock, manager] = fs::manager->access();
         auto& root           = manager.get_fs_root();
-        return root.close(std::move(handle));
+        root.close(std::move(handle));
     }
 
     auto interpret(const std::string_view arg) -> bool {
@@ -392,7 +392,7 @@ class Shell {
             handle_or(argv[1]);
             auto           size   = handle.get_filesize();
             auto           offset = 0;
-            constexpr auto chunk  = size_t(512);
+            constexpr auto chunk  = size_t(64);
             auto           buffer = std::array<char, chunk>();
             while(size > 0) {
                 const auto read_size   = std::min(size, chunk);
@@ -438,7 +438,9 @@ class Shell {
             auto task = (task::Task*)(nullptr);
             {
                 task = &task::manager->new_task();
-                task->init_context(task::elf_startup, reinterpret_cast<uint64_t>(code_frames.get()));
+                if(const auto e = task->init_context(task::elf_startup, reinterpret_cast<uint64_t>(code_frames.get()))) {
+                    print("failed to init context of new process: %d\n", e.as_int());
+                }
                 [[maybe_unused]] const auto raw_ptr = code_frames.release();
                 task->wakeup();
             }
@@ -492,7 +494,6 @@ class Shell {
     }                                                               \
     if(!var##_result) {                                             \
         task::manager->get_current_task().exit();                   \
-        return;                                                     \
     }                                                               \
     auto& var = var##_result.as_value();
 
@@ -553,7 +554,9 @@ inline auto terminal_main(TerminalMainArg& arg) -> void {
     auto shell_arg  = ShellMainArg{shell, keyboard, shell_exit};
 
     auto& shell_task = task::manager->new_task();
-    shell_task.init_context(shell_main, reinterpret_cast<int64_t>(&shell_arg));
+    if(const auto e = shell_task.init_context(shell_main, reinterpret_cast<int64_t>(&shell_arg))) {
+        task::manager->get_current_task().exit();
+    }
     shell_task.wakeup();
 
     auto event_waiter = EventsWaiter(std::array{&refresh, &framebuffer.read_event(), &shell_exit});
@@ -594,8 +597,8 @@ inline auto terminal_main(TerminalMainArg& arg) -> void {
     {
         auto [lock, manager] = fs::manager->access();
         auto& root           = manager.get_fs_root();
-        root.close(std::move(keyboard));
         root.close(std::move(framebuffer));
+        root.close(std::move(keyboard));
     }
 }
 
@@ -603,8 +606,13 @@ inline auto main(const uint64_t id, const int64_t data) -> void {
     auto& arg = *reinterpret_cast<TerminalMainArg*>(data);
     terminal_main(arg);
 
+    // exitted
+    // create next terminal
     auto& term = task::manager->new_task();
-    term.init_context(main, data);
+    if(const auto e = term.init_context(main, data)) {
+        task::manager->exit_task(&term);
+        task::manager->get_current_task().exit();
+    }
     *arg.next_task = &term;
     term.wakeup();
 

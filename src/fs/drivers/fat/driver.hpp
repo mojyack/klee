@@ -95,14 +95,16 @@ class ClusterOperator {
 
 constexpr auto end_of_cluster_chain = 0x0FFFFFF8;
 
-inline auto read_fat_for_cluster(const uint32_t cluster, const BPB::Summary& bpb, BlockDevice& block) -> uint32_t {
+inline auto read_fat_for_cluster(const uint32_t cluster, const BPB::Summary& bpb, BlockDevice& block) -> Result<uint32_t> {
     // fat[0] and fat[1] are reserved
 
     const auto sector = bpb.reserved_sector_count + (cluster * 4 / bpb.bytes_per_sector);
     const auto offset = cluster * 4 % bpb.bytes_per_sector;
 
     auto buffer = std::vector<uint8_t>(block.get_bytes_per_sector());
-    block.read_sector(sector, 1, buffer.data());
+    if(const auto e = block.read_sector(sector, 1, buffer.data())) {
+        return e;
+    }
     return *reinterpret_cast<uint32_t*>(buffer.data() + offset);
 }
 
@@ -111,7 +113,13 @@ inline auto increment_fat(uint32_t& cluster, const uint32_t count, const BPB::Su
         if(cluster == end_of_cluster_chain) {
             return false;
         }
-        cluster = read_fat_for_cluster(cluster, bpb, block);
+        if(const auto next_cluster = read_fat_for_cluster(cluster, bpb, block); !next_cluster) {
+            // TODO
+            // return error value
+            return false;
+        } else {
+            cluster = next_cluster.as_value();
+        }
     }
     return true;
 }

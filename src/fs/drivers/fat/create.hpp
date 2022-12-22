@@ -8,9 +8,7 @@ namespace fs::fat {
 inline BlockDevice::~BlockDevice() {
     auto& manager = fs::manager->unsafe_access(); 
     auto& root           = manager.get_fs_root();
-    if(const auto e = root.close(std::move(handle))) {
-        logger(LogLevel::Error, "[fat] failed to close devie file\n");
-    }
+    root.close(std::move(handle));
 }
 
 inline auto new_driver(const std::string_view path) -> Result<std::unique_ptr<Driver>> {
@@ -19,7 +17,7 @@ inline auto new_driver(const std::string_view path) -> Result<std::unique_ptr<Dr
     value_or(handle, root.open(path, fs::OpenMode::Write));
     auto driver = std::unique_ptr<Driver>(new Driver(std::move(handle)));
     error_or(driver->init());
-    return driver;
+    return std::move(driver);
 }
 
 } // namespace fs::fat

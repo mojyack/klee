@@ -2,7 +2,7 @@
 #include <array>
 #include <variant>
 
-class Error {
+class [[nodiscard]] Error {
   public:
     enum class Code : int {
         Success = 0,
@@ -81,8 +81,11 @@ class Error {
     }
 
     Error() : code(Code::Success) {}
+
     Error(const Code code) : code(code) {}
 };
+
+constexpr auto success = Error::Code::Success;
 
 template <class T>
 class Result {
@@ -106,8 +109,9 @@ class Result {
         return std::holds_alternative<T>(data);
     }
 
-    Result(T&& data) : data(std::move(data)) {}
+    Result(T data) : data(std::move(data)) {}
 
     Result(const Error error = Error()) : data(error) {}
+
     Result(const Error::Code error) : data(error) {}
 };
