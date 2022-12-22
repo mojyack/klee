@@ -61,6 +61,7 @@ run_prep: out/volume out/loader.efi out/kernel.elf apps ovmf/OVMF.fd
 	mkdir -p out/root/EFI/BOOT
 	cp out/loader.efi out/root/EFI/BOOT/BOOTX64.EFI
 	cp out/kernel.elf out/root/kernel.elf
+	cp src/main.cpp out/root/source
 	mkdir -p out/root/apps
 	cp -r out/apps/* out/root/apps
 	scripts/copyfiles.sh out/volume out/root
