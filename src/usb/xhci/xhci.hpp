@@ -57,8 +57,8 @@ inline auto calc_most_significant_bit(const uint32_t value) -> int {
 
     auto msb_index = int();
     __asm__("bsr %1, %0"
-        : "=r"(msb_index)
-        : "m"(value));
+            : "=r"(msb_index)
+            : "m"(value));
     return msb_index;
 }
 
@@ -158,7 +158,9 @@ class Controller {
     }
 
     auto address_device(const uint8_t port_id, const uint8_t slot_id) -> Error {
-        device_manager.allocate_device(slot_id, get_doorbell_register_at(slot_id));
+        if(const auto e = device_manager.allocate_device(slot_id, get_doorbell_register_at(slot_id))) {
+            return e;
+        }
 
         const auto dev = device_manager.find_by_slot(slot_id);
         if(dev == nullptr) {
@@ -308,12 +310,11 @@ class Controller {
         usbcmd.bits.interrupter_enable       = false;
         usbcmd.bits.host_system_error_enable = false;
         usbcmd.bits.enable_wrap_event        = false;
-        
+
         // host controller must be halted before resetting it
         if(!op->usbsts.read().bits.host_controller_halted) {
             usbcmd.bits.run_stop = false; // stop
         }
-
 
         op->usbcmd.write(usbcmd);
         while(!op->usbsts.read().bits.host_controller_halted) {
@@ -339,11 +340,18 @@ class Controller {
         auto       hcsparams2             = cap->hcsparams2.read();
         const auto max_scratchpad_buffers = hcsparams2.bits.max_scratchpad_buffers_low | (hcsparams2.bits.max_scratchpad_buffers_high << 5);
         if(max_scratchpad_buffers > 0) {
-            auto scratchpad_buf_arr = allocate_array<void*>(max_scratchpad_buffers, 64, 4096);
-            for(auto i = 0; i < max_scratchpad_buffers; i += 1) {
-                scratchpad_buf_arr[i] = allocate_memory<void*>(4096, 4096, 4096);
+            auto scratchpad_buf_arr = std::unique_ptr<void*>(new(std::align_val_t{64}, std::nothrow) void*[max_scratchpad_buffers]);
+            if(!scratchpad_buf_arr) {
+                return Error::Code::NoEnoughMemory;
             }
-            device_manager.get_device_contexts()[0] = reinterpret_cast<DeviceContext*>(scratchpad_buf_arr);
+            for(auto i = 0; i < max_scratchpad_buffers; i += 1) {
+                const auto buf = new(std::align_val_t{4096}, std::nothrow) std::byte[4096];
+                if(buf == nullptr) {
+                    return Error::Code::NoEnoughMemory;
+                }
+                scratchpad_buf_arr.get()[i] = buf;
+            }
+            device_manager.get_device_contexts()[0] = std::bit_cast<DeviceContext*>(scratchpad_buf_arr.release());
         }
 
         auto dcbaap = DCBAAPBitmap();

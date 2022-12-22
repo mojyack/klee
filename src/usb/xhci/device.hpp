@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "../../error.hpp"
-#include "../arraymap.hpp"
+#include "../../log.hpp"
 #include "../device.hpp"
 #include "context.hpp"
 #include "registers.hpp"
@@ -12,9 +12,8 @@
 
 #include "../../print.hpp"
 
-
 namespace usb::xhci {
-class Device : public usb::Device {
+class Device final : public usb::Device {
   public:
     enum class State {
         Invalid,
@@ -32,7 +31,7 @@ class Device : public usb::Device {
     State                 state;
     std::array<Ring*, 31> transfer_rings;
 
-    ArrayMap<const void*, const SetupStageTRB*, 16> setup_stage_map;
+    std::unordered_map<const void*, const SetupStageTRB*> setup_stage_map;
 
     static auto make_setupstage_trb(const SetupData setup_data, const int transfer_type) -> SetupStageTRB {
         auto setup               = SetupStageTRB();
@@ -82,11 +81,11 @@ class Device : public usb::Device {
         state = State::SlotAssigning;
     }
 
-    auto allocate_transfer_ring(const DeviceContextIndex index, const size_t buffer_size) -> Ring* {
+    auto allocate_transfer_ring(const DeviceContextIndex index, const size_t buffer_count) -> Ring* {
         const auto i  = index.value - 1;
-        const auto tr = allocate_array<Ring>(1, 64, 4096);
-        if(tr) {
-            tr->initialize(buffer_size);
+        const auto tr = new(std::nothrow) Ring;
+        if(tr != nullptr) {
+            tr->initialize(buffer_count);
         }
         transfer_rings[i] = tr;
         return tr;
@@ -117,14 +116,14 @@ class Device : public usb::Device {
             const auto data_trb_position      = tr->push(data);
             tr->push(status);
 
-            setup_stage_map.set(data_trb_position, setup_trb_position);
+            setup_stage_map[data_trb_position] = setup_trb_position;
         } else {
             const auto setup_trb_position       = trb_dynamic_cast<SetupStageTRB>(tr->push(make_setupstage_trb(setup_data, SetupStageTRB::no_data_stage)));
             status.bits.direction               = true;
             status.bits.interrupt_on_completion = true;
             const auto status_trb_position      = tr->push(status);
 
-            setup_stage_map.set(status_trb_position, setup_trb_position);
+            setup_stage_map[status_trb_position] = setup_trb_position;
         }
 
         doorbell_register->ring(dci.value);
@@ -158,13 +157,13 @@ class Device : public usb::Device {
             const auto data_trb_position      = tr->push(data);
             tr->push(status);
 
-            setup_stage_map.set(data_trb_position, setup_trb_position);
+            setup_stage_map[data_trb_position] = setup_trb_position;
         } else {
             const auto setup_trb_position       = trb_dynamic_cast<SetupStageTRB>(tr->push(make_setupstage_trb(setup_data, SetupStageTRB::no_data_stage)));
             status.bits.interrupt_on_completion = true;
             const auto status_trb_position      = tr->push(status);
 
-            setup_stage_map.set(status_trb_position, setup_trb_position);
+            setup_stage_map[status_trb_position] = setup_trb_position;
         }
 
         doorbell_register->ring(dci.value);
@@ -216,16 +215,16 @@ class Device : public usb::Device {
             return on_interrupt_completed(trb.get_endpoint_id(), normal_trb->get_pointer(), transfer_length);
         }
 
-        const auto opt_setup_stage_trb = setup_stage_map.get(issuer_trb);
-        if(!opt_setup_stage_trb) {
+        const auto opt_setup_stage_trb = setup_stage_map.find(issuer_trb);
+        if(opt_setup_stage_trb == setup_stage_map.end()) {
             if(const auto data_trb = trb_dynamic_cast<DataStageTRB>(issuer_trb)) {
-                // log(Debug, *data_trb);
+                logger(LogLevel::Error, "usb::xhci: no corresponding setup stage %d", data_trb->type);
             }
             return Error::Code::NoCorrespondingSetupStage;
         }
         setup_stage_map.erase(issuer_trb);
 
-        const auto setup_stage_trb   = opt_setup_stage_trb.value();
+        const auto setup_stage_trb   = opt_setup_stage_trb->second;
         auto       setup_data        = SetupData();
         setup_data.request_type.data = setup_stage_trb->bits.request_type;
         setup_data.request           = setup_stage_trb->bits.request;

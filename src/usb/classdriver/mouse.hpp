@@ -1,5 +1,6 @@
 #pragma once
-#include "../memory.hpp"
+#include <functional>
+
 #include "hid-decl.hpp"
 
 namespace usb {
@@ -20,14 +21,6 @@ class HIDMouseDriver : public HIDBaseDriver {
 
   public:
     static inline std::function<ObserverType> default_observer;
-
-    auto operator new(const size_t size) -> void* {
-        return allocate_memory<void>(sizeof(HIDMouseDriver), 0, 0);
-    }
-
-    auto operator delete(void* const ptr) noexcept -> void {
-        deallocate_memory(ptr);
-    }
 
     auto on_data_received() -> Error override {
         const auto buttons        = get_buffer()[0];

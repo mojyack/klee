@@ -1,5 +1,7 @@
 #pragma once
-#include "../memory.hpp"
+#include <functional>
+
+#include "../../debug.hpp"
 #include "hid-decl.hpp"
 
 namespace usb {
@@ -20,14 +22,6 @@ class HIDKeyboardDriver : public HIDBaseDriver {
 
   public:
     static inline std::function<ObserverType> default_observer;
-
-    auto operator new(const size_t size) -> void* {
-        return allocate_memory<void>(sizeof(HIDKeyboardDriver), 0, 0);
-    }
-
-    auto operator delete(void* const ptr) noexcept -> void {
-        deallocate_memory(ptr);
-    }
 
     auto on_data_received() -> Error override {
         for(auto i = 2; i < 8; i += 1) {

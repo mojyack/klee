@@ -1,12 +1,11 @@
 #pragma once
 #include "../error.hpp"
-#include "arraymap.hpp"
+#include "../print.hpp"
 #include "classdriver/keyboard.hpp"
 #include "classdriver/mouse.hpp"
 #include "descriptor.hpp"
 #include "endpoint.hpp"
 #include "setupdata.hpp"
-#include "../print.hpp"
 
 namespace usb {
 namespace internal {
@@ -51,7 +50,7 @@ inline auto make_endpoint_config(const EndpointDescriptor& desc) -> EndpointConf
 
 class Device {
   private:
-    ArrayMap<SetupData, ClassDriver*, 4> event_waiters;
+    std::unordered_map<SetupData, ClassDriver*, SetupData::Hasher> event_waiters;
 
     bool                           initialized      = false;
     int                            initialize_phase = 0;
@@ -175,8 +174,8 @@ class Device {
   protected:
     auto on_control_completed(const EndpointID id, const SetupData setup_data, const void* const buf, const int len) -> Error {
         if(initialized) {
-            if(const auto w = event_waiters.get(setup_data)) {
-                return (*w)->on_control_completed(id, setup_data, buf, len);
+            if(const auto p = event_waiters.find(setup_data); p != event_waiters.end()) {
+                return p->second->on_control_completed(id, setup_data, buf, len);
             }
             return Error::Code::NoWaiter;
         }
@@ -213,14 +212,14 @@ class Device {
   public:
     virtual auto control_in(const EndpointID id, const SetupData setup_data, void* const buf, const int len, ClassDriver* const issuer) -> Error {
         if(issuer != nullptr) {
-            event_waiters.set(setup_data, issuer);
+            event_waiters[setup_data] = issuer;
         }
         return Error::Code::Success;
     }
 
     virtual auto control_out(const EndpointID id, const SetupData setup_data, void* const buf, const int len, ClassDriver* const issuer) -> Error {
         if(issuer != nullptr) {
-            event_waiters.set(setup_data, issuer);
+            event_waiters[setup_data] = issuer;
         }
         return Error::Code::Success;
     }
@@ -259,6 +258,12 @@ class Device {
         return Error::Code::Success;
     }
 
-    ~Device() {}
+    Device() {
+        for(auto& c : class_drivers) {
+            c = nullptr;
+        }
+    }
+
+    virtual ~Device() = default;
 };
 } // namespace usb

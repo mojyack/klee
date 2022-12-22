@@ -89,5 +89,21 @@ struct SetupData {
                index == o.index &&
                length == o.length;
     }
+
+    struct Hasher {
+        auto operator()(const SetupData& data) const -> uint64_t {
+            union Packed {
+                struct {
+                    uint8_t  request_type;
+                    uint8_t  request;
+                    uint16_t value;
+                    uint16_t index;
+                    uint16_t length;
+                } __attribute__((packed)) bits;
+                uint64_t data;
+            };
+            return Packed{.bits = {.request_type = data.request_type.data, .request = data.request, .value = data.value, .index = data.index, .length = data.length}}.data;
+        }
+    };
 };
 } // namespace usb

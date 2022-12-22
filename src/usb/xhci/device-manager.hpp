@@ -1,40 +1,39 @@
 #pragma once
-#include "../memory.hpp"
 #include "context.hpp"
 #include "device.hpp"
 
 namespace usb::xhci {
 class DeviceManager {
   private:
-    DeviceContext** device_context_pointers;
     size_t          max_slots;
     Device**        devices;
+    DeviceContext** device_contexts;
 
   public:
     auto initialize(const size_t max_slots) -> Error {
         this->max_slots = max_slots;
 
-        devices = allocate_array<Device*>(max_slots + 1, 0, 0);
+        devices = new(std::nothrow) Device*[max_slots + 1];
         if(devices == nullptr) {
             return Error::Code::NoEnoughMemory;
         }
 
-        device_context_pointers = allocate_array<DeviceContext*>(max_slots + 1, 64, 4096);
-        if(device_context_pointers == nullptr) {
-            deallocate_memory(devices);
+        device_contexts = new(std::align_val_t{4096}, std::nothrow) DeviceContext*[max_slots + 1];
+        if(!device_contexts) {
+            delete[] devices;
             return Error::Code::NoEnoughMemory;
         }
 
         for(auto i = size_t(0); i <= max_slots; i += 1) {
-            devices[i]                 = nullptr;
-            device_context_pointers[i] = nullptr;
+            devices[i]         = nullptr;
+            device_contexts[i] = nullptr;
         }
 
         return Error::Code::Success;
     }
 
     auto get_device_contexts() const -> DeviceContext** {
-        return device_context_pointers;
+        return device_contexts;
     }
 
     auto find_by_port(const uint8_t port_number, const uint32_t route_string) const -> Device* {
@@ -79,8 +78,11 @@ class DeviceManager {
             return Error::Code::AlreadyAllocated;
         }
 
-        devices[slot_id] = allocate_array<Device>(1, 64, 4096);
-        new(devices[slot_id]) Device(slot_id, doorbell_register);
+        const auto new_device = new(std::align_val_t{64}, std::nothrow) Device(slot_id, doorbell_register);
+        if(new_device == nullptr) {
+            return Error::Code::NoEnoughMemory;
+        }
+        devices[slot_id] = new_device;
         return Error::Code::Success;
     }
 
@@ -89,16 +91,30 @@ class DeviceManager {
             return Error::Code::InvalidSlotID;
         }
 
-        const auto dev                   = devices[slot_id];
-        device_context_pointers[slot_id] = dev->get_device_context();
+        const auto dev           = devices[slot_id];
+        device_contexts[slot_id] = dev->get_device_context();
         return Error::Code::Success;
     }
 
     auto remove(const uint8_t slot_id) -> Error {
-        device_context_pointers[slot_id] = nullptr;
-        deallocate_memory(devices[slot_id]);
+        device_contexts[slot_id] = nullptr;
+        delete devices[slot_id];
         devices[slot_id] = nullptr;
         return Error::Code::Success;
+    }
+
+    auto operator=(DeviceManager&) -> DeviceManager& = delete;
+
+    DeviceManager(DeviceManager&) = delete;
+
+    DeviceManager() = default;
+
+    ~DeviceManager() {
+        for(auto i = 0; i <= max_slots; i += 1) {
+            delete devices[i];
+        }
+        delete[] devices;
+        delete[] device_contexts;
     }
 };
 } // namespace usb::xhci
