@@ -35,36 +35,32 @@ inline auto set_idt_entry(Vector index, const InterruptDescriptorAttribute attr,
 
 __attribute__((no_caller_saved_registers)) inline auto notify_end_of_interrupt() -> void {
     volatile auto end_of_interrupt = reinterpret_cast<uint32_t*>(0xFEE000B0);
-    *end_of_interrupt = 0;
+    *end_of_interrupt              = 0;
 }
 
-inline auto timer_manager = (timer::TimerManager*)(nullptr);
-
 __attribute__((interrupt)) static auto int_handler_xhci(InterruptFrame* const frame) -> void {
-    task::kernel_task->send_message_may_fail(MessageType::XHCIInterrupt);
+    process::manager->post_kernel_message(MessageType::XHCIInterrupt);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_ahci(InterruptFrame* const frame) -> void {
-    task::kernel_task->send_message_may_fail(MessageType::AHCIInterrupt);
+    process::manager->post_kernel_message(MessageType::AHCIInterrupt);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_control(InterruptFrame* const frame) -> void {
-    task::kernel_task->send_message_may_fail(MessageType::VirtIOGPUControl);
+    process::manager->post_kernel_message(MessageType::VirtIOGPUControl);
     notify_end_of_interrupt();
 }
 
 __attribute__((interrupt)) static auto int_handler_virtio_gpu_cursor(InterruptFrame* const frame) -> void {
-    task::kernel_task->send_message_may_fail(MessageType::VirtIOGPUCursor);
+    process::manager->post_kernel_message(MessageType::VirtIOGPUCursor);
     notify_end_of_interrupt();
 }
 
 } // namespace internal
 
-inline auto initialize(timer::TimerManager& timer_manager) -> void {
-    internal::timer_manager = &timer_manager;
-
+inline auto initialize() -> void {
     const auto cs = read_cs();
 
 #define sie_ist(num, addr, ist) \

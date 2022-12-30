@@ -1,6 +1,6 @@
 #pragma once
 #include "fs/manager.hpp"
-#include "task/elf-startup.hpp"
+#include "process/elf-startup.hpp"
 
 namespace terminal {
 class FramebufferWriter {
@@ -204,8 +204,8 @@ class Terminal {
 
 class EventsWaiter {
   private:
-    std::vector<uint64_t> event_ids;
-    std::vector<Event*>   events;
+    std::vector<process::EventID> event_ids;
+    std::vector<Event*>           events;
 
   public:
     auto wait() -> size_t {
@@ -217,7 +217,9 @@ class EventsWaiter {
             }
         }
 
-        task::manager->get_current_task().wait_events(event_ids);
+        if(const auto e = process::manager->wait_events(event_ids)) {
+            logger(LogLevel::Error, "terminal: wait_events failed: %d\n", e.as_int());
+        }
         goto loop;
     }
 
@@ -228,6 +230,12 @@ class EventsWaiter {
         for(auto i = 0; i < es.size(); i += 1) {
             event_ids[i] = es[i]->read_id();
             events[i]    = es[i];
+        }
+    }
+
+    ~EventsWaiter() {
+        if(const auto e = process::manager->unwait_events(event_ids)) {
+            logger(LogLevel::Error, "terminal: failed to cancel events: %d\n", e.as_int());
         }
     }
 };
@@ -434,18 +442,25 @@ class Shell {
                 close_handle(std::move(handle));
                 return true;
             }
-
-            auto task = (task::Task*)(nullptr);
-            {
-                task = &task::manager->new_task();
-                if(const auto e = task->init_context(task::elf_startup, reinterpret_cast<uint64_t>(code_frames.get()))) {
-                    print("failed to init context of new process: %d\n", e.as_int());
-                }
-                [[maybe_unused]] const auto raw_ptr = code_frames.release();
-                task->wakeup();
-            }
             close_handle(std::move(handle));
-            task::manager->wait_task(task);
+
+            const auto pid   = process::manager->create_process();
+            const auto tid_r = process::manager->create_thread(pid, process::elf_startup, reinterpret_cast<uint64_t>(code_frames.release()));
+            if(!tid_r) {
+                print("failed to create new thread: %d\n", tid_r.as_error().as_int());
+            } else {
+                const auto tid = tid_r.as_value();
+                if(const auto e = process::manager->wakeup_thread(pid, tid)) {
+                    print("failed to wakeup thread: %d\n", e.as_int());
+                } else {
+                    if(const auto e = process::manager->wait_thread(pid, tid)) {
+                        print("failed to wait thread: %d\n", e.as_int());
+                    }
+                }
+                if(const auto e = process::manager->wait_process(pid)) {
+                    print("failed to wait process: %d\n", e.as_int());
+                }
+            }
         } else {
             puts("unknown command");
         }
@@ -493,7 +508,7 @@ class Shell {
         var##_result         = root.open(path, fs::OpenMode::mode); \
     }                                                               \
     if(!var##_result) {                                             \
-        task::manager->get_current_task().exit();                   \
+        process::manager->exit_this_thread();                       \
     }                                                               \
     auto& var = var##_result.as_value();
 
@@ -521,18 +536,21 @@ inline auto shell_main(const uint64_t id, const int64_t data) -> void {
         }
     }
     exit.notify();
-    task::manager->get_current_task().exit();
+    process::manager->exit_this_thread();
 }
 
-struct TerminalMainArg {
-    const char*  framebuffer_path;
-    task::Task** next_task;
-};
+[[noreturn]] inline auto panic(const char* const message, const int code) -> void {
+    logger(LogLevel::Error, "terminal: %s: %d\n", code);
+    debug::println("terminal: error");
+    while(true) {
+        process::manager->sleep_this_thread();
+    }
+}
 
-inline auto terminal_main(TerminalMainArg& arg) -> void {
+inline auto terminal_main(const char** const fb_device) -> void {
     // open devices
     handle_or(keyboard, "/dev/keyboard-usb0", Read);
-    handle_or(framebuffer, arg.framebuffer_path, Write);
+    handle_or(framebuffer, *fb_device, Write);
 
     // get framebuffer config
     auto fb_size            = std::array<size_t, 2>();
@@ -553,46 +571,56 @@ inline auto terminal_main(TerminalMainArg& arg) -> void {
     auto shell_exit = Event();
     auto shell_arg  = ShellMainArg{shell, keyboard, shell_exit};
 
-    auto& shell_task = task::manager->new_task();
-    if(const auto e = shell_task.init_context(shell_main, reinterpret_cast<int64_t>(&shell_arg))) {
-        task::manager->get_current_task().exit();
+    const auto this_process   = process::manager->get_this_thread()->process;
+    const auto shell_thread_r = process::manager->create_thread(this_process->id, shell_main, reinterpret_cast<int64_t>(&shell_arg));
+    if(!shell_thread_r) {
+        panic("failed to create shell thread", shell_thread_r.as_error());
     }
-    shell_task.wakeup();
+    const auto shell_thread = shell_thread_r.as_value();
+    if(const auto e = process::manager->wakeup_thread(this_process->id, shell_thread)) {
+        panic("failed to wakeup shell thread", e.as_int());
+    }
 
-    auto event_waiter = EventsWaiter(std::array{&refresh, &framebuffer.read_event(), &shell_exit});
-    auto swap_done    = true;
-    auto swap_pending = false;
-    auto exit         = false;
-    while(!exit) {
-        switch(event_waiter.wait()) {
-        case 0: {
-            refresh.reset();
-            if(swap_done) {
-                swap_done = false;
-                if(fb_double_buffered) {
-                    memcpy(*fb_data, fb_buffer.data(), fb_buffer.size());
+    {
+        auto event_waiter = EventsWaiter(std::array{&refresh, &framebuffer.read_event(), &shell_exit});
+        auto swap_done    = true;
+        auto swap_pending = false;
+        auto exit         = false;
+        while(!exit) {
+            switch(event_waiter.wait()) {
+            case 0: {
+                refresh.reset();
+                if(swap_done) {
+                    swap_done = false;
+                    if(fb_double_buffered) {
+                        memcpy(*fb_data, fb_buffer.data(), fb_buffer.size());
+                    }
+                    return_or(framebuffer.control_device(fs::DeviceOperation::Swap, 0));
+                } else {
+                    swap_pending = true;
                 }
-                return_or(framebuffer.control_device(fs::DeviceOperation::Swap, 0));
-            } else {
-                swap_pending = true;
-            }
-        } break;
-        case 1:
-            framebuffer.read_event().reset();
-            if(swap_pending) {
-                swap_pending = false;
-                if(fb_double_buffered) {
-                    memcpy(*fb_data, fb_buffer.data(), fb_buffer.size());
+            } break;
+            case 1:
+                framebuffer.read_event().reset();
+                if(swap_pending) {
+                    swap_pending = false;
+                    if(fb_double_buffered) {
+                        memcpy(*fb_data, fb_buffer.data(), fb_buffer.size());
+                    }
+                    return_or(framebuffer.control_device(fs::DeviceOperation::Swap, 0));
+                } else {
+                    swap_done = true;
                 }
-                return_or(framebuffer.control_device(fs::DeviceOperation::Swap, 0));
-            } else {
-                swap_done = true;
+                break;
+            case 2:
+                exit = true;
+                break;
             }
-            break;
-        case 2:
-            exit = true;
-            break;
         }
+    }
+
+    if(const auto e = process::manager->wait_thread(this_process->id, shell_thread)) {
+        panic("failed to wait for shell thread", e.as_int());
     }
     {
         auto [lock, manager] = fs::manager->access();
@@ -603,20 +631,9 @@ inline auto terminal_main(TerminalMainArg& arg) -> void {
 }
 
 inline auto main(const uint64_t id, const int64_t data) -> void {
-    auto& arg = *reinterpret_cast<TerminalMainArg*>(data);
-    terminal_main(arg);
-
-    // exitted
-    // create next terminal
-    auto& term = task::manager->new_task();
-    if(const auto e = term.init_context(main, data)) {
-        task::manager->exit_task(&term);
-        task::manager->get_current_task().exit();
+    while(true) {
+        terminal_main(reinterpret_cast<const char**>(data));
     }
-    *arg.next_task = &term;
-    term.wakeup();
-
-    task::manager->get_current_task().exit();
 }
 } // namespace terminal
 

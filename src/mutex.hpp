@@ -1,22 +1,27 @@
 #pragma once
-#include "mutex-like.hpp"
-#include "task/manager.hpp"
+#include "log.hpp"
+#include "process/manager.hpp"
+#include "util/mutex-like.hpp"
 
 class Mutex {
   private:
     std::atomic_flag flag;
-    uint64_t         id = 0;
+    process::EventID id;
 
     auto erase() -> void {
-        if(id != 0) {
-            task::manager->delete_event(id);
+        if(id != process::invalid_event) {
+            if(const auto e = process::manager->delete_event(id)) {
+                logger(LogLevel::Error, "mutex: failed to delete event %lu(%lu)\n", id, e.as_int());
+            }
         }
     }
 
   public:
     auto aquire() -> void {
         while(flag.test_and_set()) {
-            task::manager->get_current_task().wait_event(id);
+            if(const auto e = process::manager->wait_event(id)) {
+                logger(LogLevel::Error, "mutex: failed to wait event %lu(%lu)\n", id, e.as_int());
+            }
         }
     }
 
@@ -29,13 +34,15 @@ class Mutex {
 
     auto release() -> void {
         flag.clear();
-        task::manager->notify_event(id);
+        if(const auto e = process::manager->notify_event(id)) {
+            logger(LogLevel::Error, "mutex: failed to notify event %lu(%lu)\n", id, e.as_int());
+        }
     }
 
     auto operator=(Mutex&& o) -> Mutex& {
         erase();
         id   = o.id;
-        o.id = 0;
+        o.id = process::invalid_event;
         return *this;
     }
 
@@ -43,39 +50,45 @@ class Mutex {
         *this = std::move(o);
     }
 
-    Mutex() : id(task::manager->new_event()) {}
+    Mutex() : id(process::manager->create_event()) {}
 
     ~Mutex() {
         erase();
     }
 };
 
-using SmartMutex = AutoMutex<Mutex>;
+using SmartMutex = mutex_like::AutoMutex<Mutex>;
 
 template <class T>
-using Critical = SharedValue<Mutex, T>;
+using Critical = mutex_like::SharedValue<Mutex, T>;
 
 class Event {
   private:
     std::atomic_flag flag;
-    uint64_t         id = 0;
+    process::EventID id;
 
     auto erase() -> void {
-        if(id != 0) {
-            task::manager->delete_event(id);
+        if(id != process::invalid_event) {
+            if(const auto e = process::manager->delete_event(id)) {
+                logger(LogLevel::Error, "mutex: failed to delete event %lu(%lu)\n", id, e.as_int());
+            }
         }
     }
 
   public:
     auto wait() -> void {
         while(!flag.test()) {
-            task::manager->get_current_task().wait_event(id);
+            if(const auto e = process::manager->wait_event(id)) {
+                logger(LogLevel::Error, "mutex: failed to wait event %lu(%lu)\n", id, e.as_int());
+            }
         }
     }
 
     auto notify() -> void {
         if(!flag.test_and_set()) {
-            task::manager->notify_event(id);
+            if(const auto e = process::manager->notify_event(id)) {
+                logger(LogLevel::Error, "mutex: failed to notify event %lu(%lu)\n", id, e.as_int());
+            }
         }
     }
 
@@ -84,21 +97,21 @@ class Event {
     }
 
     auto is_valid() const -> bool {
-        return id != 0;
+        return id != process::invalid_event;
     }
 
     auto test() const -> bool {
         return flag.test();
     }
 
-    auto read_id() const -> uint64_t {
+    auto read_id() const -> process::EventID {
         return id;
     }
 
     auto operator=(Event&& o) -> Event& {
         erase();
         id   = o.id;
-        o.id = 0;
+        o.id = process::invalid_event;
         return *this;
     }
 
@@ -106,7 +119,7 @@ class Event {
         *this = std::move(o);
     }
 
-    Event() : id(task::manager->new_event()) {}
+    Event() : id(process::manager->create_event()) {}
 
     ~Event() {
         erase();

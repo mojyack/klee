@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <span>
 
 #include "asmcode.h"
 #include "error.hpp"
@@ -348,94 +349,66 @@ struct Device {
     }
 };
 
-class Devices {
-  private:
-    std::array<Device, 32> data;
-    size_t                 size;
+inline auto scan_devices() -> std::vector<Device> {
+    class Scanner {
+      private:
+        std::vector<Device> data;
 
-    auto add_device(const Device& device) -> Error {
-        if(size == data.size()) {
-            return Error::Code::Full;
-        }
-        data[size] = device;
-        size += 1;
-        return Success();
-    }
+        auto scan_function(const uint8_t bus, const uint8_t dev, const uint8_t fn) -> void {
+            const auto header_type = read_header_type(bus, dev, fn);
+            const auto class_code  = read_class_code(bus, dev, fn);
 
-    auto scan_function(const uint8_t bus, const uint8_t dev, const uint8_t fn) -> Error {
-        const auto header_type = read_header_type(bus, dev, fn);
-        const auto class_code  = read_class_code(bus, dev, fn);
-        const auto device      = Device{bus, dev, fn, header_type, class_code};
+            data.push_back(Device{bus, dev, fn, header_type, class_code});
 
-        if(const auto error = add_device(device)) {
-            return error;
-        }
-
-        if(class_code.match(0x06u, 0x04u)) {
-            // standard PCI-PCI bridge
-            const auto bus_numbers   = read_bus_numbers(bus, dev, fn);
-            const auto secondary_bus = (bus_numbers >> 8) & 0xFFu;
-            return scan_bus(secondary_bus);
-        }
-        return Success();
-    }
-
-    auto scan_device(const uint8_t bus, const uint8_t dev) -> Error {
-        if(const auto error = scan_function(bus, dev, 0)) {
-            return error;
-        }
-
-        if(is_single_function_device(read_header_type(bus, dev, 0))) {
-            return Success();
-        }
-
-        for(auto fn = uint8_t(1); fn < 8; fn += 1) {
-            if(read_vender_id(bus, dev, fn) == 0xFFFFu) {
-                continue;
-            }
-            if(const auto error = scan_function(bus, dev, fn)) {
-                return error;
+            if(class_code.match(0x06u, 0x04u)) {
+                // standard PCI-PCI bridge
+                const auto bus_numbers   = read_bus_numbers(bus, dev, fn);
+                const auto secondary_bus = (bus_numbers >> 8) & 0xFFu;
+                scan_bus(secondary_bus);
             }
         }
 
-        return Success();
-    }
+        auto scan_device(const uint8_t bus, const uint8_t dev) -> void {
+            scan_function(bus, dev, 0);
 
-    auto scan_bus(const uint8_t bus) -> Error {
-        for(auto dev = uint8_t(0); dev < 32; dev += 1) {
-            if(read_vender_id(bus, dev, 0) == 0xFFFFu) {
-                continue;
+            if(is_single_function_device(read_header_type(bus, dev, 0))) {
+                return;
             }
-            if(const auto error = scan_device(bus, dev)) {
-                return error;
-            }
-        }
 
-        return Success();
-    }
-
-  public:
-    auto scan_all_bus() -> Error {
-        size = 0;
-
-        if(is_single_function_device(read_header_type(0, 0, 0))) {
-            return scan_bus(0);
-        }
-
-        for(auto fn = uint8_t(1); fn < 8; fn += 1) {
-            if(read_vender_id(0, 0, fn) == 0xFFFFu) {
-                continue;
-            }
-            if(const auto error = scan_bus(fn)) {
-                return error;
+            for(auto fn = uint8_t(1); fn < 8; fn += 1) {
+                if(read_vender_id(bus, dev, fn) == 0xFFFFu) {
+                    continue;
+                }
+                scan_function(bus, dev, fn);
             }
         }
 
-        return Success();
-    }
+        auto scan_bus(const uint8_t bus) -> void {
+            for(auto dev = uint8_t(0); dev < 32; dev += 1) {
+                if(read_vender_id(bus, dev, 0) == 0xFFFFu) {
+                    continue;
+                }
+                scan_device(bus, dev);
+            }
+        }
 
-    auto get_devices() const -> std::pair<size_t, const decltype(data)&> {
-        return {size, data};
-    }
-};
+      public:
+        auto scan() -> std::vector<Device> {
+            if(is_single_function_device(read_header_type(0, 0, 0))) {
+                scan_bus(0);
+            } else {
+                for(auto fn = uint8_t(1); fn < 8; fn += 1) {
+                    if(read_vender_id(0, 0, fn) == 0xFFFFu) {
+                        continue;
+                    }
+                    scan_bus(fn);
+                }
+            }
+
+            return std::move(data);
+        }
+    };
+
+    return Scanner().scan();
+}
 } // namespace pci

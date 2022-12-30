@@ -11,7 +11,6 @@
 #include "panic.hpp"
 #include "segment.hpp"
 #include "syscall.hpp"
-#include "task/task-impl.hpp"
 #include "terminal.hpp"
 #include "timer.hpp"
 #include "usb/classdriver/hid.hpp"
@@ -24,15 +23,15 @@ class Kernel {
     FramebufferConfig   framebuffer_config;
     acpi::RSDP&         rsdp;
 
-    static auto switch_ehci_to_xhci(const pci::Devices& pci, const pci::Device& xhc_dev) -> void {
-        auto intel_ehc_exist       = false;
-        const auto& [len, devices] = pci.get_devices();
-        for(auto i = size_t(0); i < len; i += 1) {
-            if(devices[i].class_code.match(0x0cu, 0x03u, 0x20u) /* EHCI */ && devices[i].read_vender_id() == 0x8086) {
+    static auto switch_ehci_to_xhci(const std::vector<pci::Device>& devices, const pci::Device& xhc_dev) -> void {
+        auto intel_ehc_exist = false;
+        for(const auto& dev : devices) {
+            if(dev.class_code.match(0x0cu, 0x03u, 0x20u) /* EHCI */ && dev.read_vender_id() == 0x8086) {
                 intel_ehc_exist = true;
                 break;
             }
         }
+
         if(!intel_ehc_exist) {
             return;
         }
@@ -43,6 +42,83 @@ class Kernel {
         xhc_dev.write_register(0xD0, ehci2xhci_ports);             // XUSB2PR
     }
 
+    struct PCIScanResult {
+        std::vector<pci::Device> devices;
+        const pci::Device*       xhc;
+        const pci::Device*       virtio_gpu;
+        const pci::Device*       ahci;
+    };
+
+    static auto scan_pci_devices() -> PCIScanResult {
+        logger(LogLevel::Info, "kernel: scanning pci devices...\n");
+        auto devices = pci::scan_devices();
+
+        auto xhc        = (const pci::Device*)(nullptr);
+        auto virtio_gpu = (const pci::Device*)(nullptr);
+        auto ahci       = (const pci::Device*)(nullptr);
+
+        logger(LogLevel::Info, "kernel: %lu pci devices found. searching pci devices...\n", devices.size());
+        for(auto& dev : devices) {
+            const auto vendor_id = dev.read_vender_id();
+            logger(LogLevel::Info, "  %d.%d.%d: vend %04x, class %08x, head %02x\n", dev.bus, dev.device, dev.function, vendor_id, dev.class_code, dev.header_type);
+
+            if(dev.class_code.match(0x0Cu, 0x03u, 0x30u)) {
+                if(xhc == nullptr || (xhc->read_vender_id() != 0x8086 && vendor_id == 0x8086)) {
+                    xhc = &dev;
+                }
+            } else if(dev.read_vender_id() == 0x1AF4 && pci::read_device_id(dev.bus, dev.device, dev.function) == (0x1040 + 16)) {
+                virtio_gpu = &dev;
+            } else if(dev.class_code.match(0x01, 0x06)) {
+                ahci = &dev;
+            }
+        }
+        return PCIScanResult{.devices = std::move(devices), .xhc = xhc, .virtio_gpu = virtio_gpu, .ahci = ahci};
+    }
+
+    static auto setup_xhc(const pci::Device& dev) -> std::optional<std::unique_ptr<usb::xhci::Controller>> {
+        const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
+
+        if(dev.configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::Vector::XHCI, 0) &&
+           dev.configure_msix_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::Vector::XHCI, 0)) {
+            logger(LogLevel::Error, "kernel: failed to configure msi for xHC device");
+            return std::nullopt;
+        }
+
+        // find mmio address of xhc device
+        const auto xhc_bar_r = dev.read_bar(0);
+        if(!xhc_bar_r) {
+            logger(LogLevel::Error, "kernel: failed to read xhc bar\n");
+            return std::nullopt;
+        }
+        const auto xhc_bar = xhc_bar_r.as_value();
+
+        const auto xhc_mmio_base = xhc_bar & ~static_cast<uint64_t>(0x0F);
+        logger(LogLevel::Debug, "kernel: xHC mmio_base=%08lx\n", xhc_mmio_base);
+
+        auto xhc = std::unique_ptr<usb::xhci::Controller>(new usb::xhci::Controller(xhc_mmio_base));
+        if(const auto e = xhc->initialize()) {
+            logger(LogLevel::Error, "kernel: failed to initialize xhc: %d", e.as_int());
+            return std::nullopt;
+        }
+        if(const auto e = xhc->run()) {
+            logger(LogLevel::Error, "kernel: failed to start xhc: %d", e.as_int());
+            return std::nullopt;
+        }
+
+        for(auto i = 1; i <= xhc->get_max_ports(); i += 1) {
+            auto port = xhc->get_port_at(i);
+            if(!port.is_connected()) {
+                continue;
+            }
+            if(const auto e = xhc->configure_port(port)) {
+                logger(LogLevel::Error, "kernel: failed to configure port: %d\n", e);
+                return std::nullopt;
+            }
+        }
+
+        return std::move(xhc);
+    }
+
   public:
     auto run() -> void {
         // setup memory manager
@@ -51,21 +127,22 @@ class Kernel {
         fatal_assert(!memory_manager.initialize_heap(), "failed to initialize heap memory");
         allocator = &memory_manager;
 
-        // create task manager
-        // mutex needs this
-        auto tm       = task::TaskManager();
-        task::manager = &tm;
-
         // create debug output
         // TODO
         // remove this
         auto debug_fb = debug::Framebuffer(framebuffer_config);
         debug::fb     = &debug_fb;
 
+        // create task manager
+        // mutex needs this
+        auto pm          = process::Manager();
+        process::manager = &pm;
+
         // create filesystem mananger
         auto fs_manager = Critical<fs::FilesystemManager>();
         fs::manager     = &fs_manager;
-        // mount "/dev"
+
+        // - mount "/dev"
         {
             auto& manager = fs::manager->unsafe_access(); // no other threads exist here
             if(const auto e = manager.mount("devfs", "/dev")) {
@@ -83,7 +160,7 @@ class Kernel {
 
         // initialize tss
         if(const auto e = segment::setup_tss()) {
-            logger(LogLevel::Error, "failed to setup tss\n");
+            fatal_error("failed to setup tss: ", e.as_int());
         }
 
         // initialize syscall
@@ -91,168 +168,135 @@ class Kernel {
 
         // initialize acpi
         if(!acpi::initialize(rsdp)) {
+            fatal_error("failde to initialize acpi");
             return;
         }
         if(acpi::madt != nullptr) {
             const auto cores = acpi::detect_cores();
             for(auto i = 0; i < cores.lapic_ids.size(); i += 1) {
-                logger(LogLevel::Info, "acpi: cpu core %d detected: lapic_id = %u\n", i, cores.lapic_ids[i]);
+                logger(LogLevel::Info, "kernel: cpu core %d detected: lapic_id = %u\n", i, cores.lapic_ids[i]);
             }
         }
 
         // start timer
         timer::initialize_timer();
-        auto timer_manager = timer::TimerManager();
 
         // initialize idt
-        interrupt::initialize(timer_manager);
+        interrupt::initialize();
 
-        // task switching timer
-        timer_manager.add_timer({5, 0, timer::Flags::Periodic | timer::Flags::Task});
+        // setup devices
+        auto usb_keyboard = std::unique_ptr<devfs::USBKeyboard>();
 
-        task::kernel_task = &task::manager->get_current_task();
+        // - setup pci devices
+        const auto pci_devices = scan_pci_devices();
 
-        // scan pci devices
-        auto       pci              = pci::Devices();
-        const auto error            = pci.scan_all_bus();
-        const auto& [size, devices] = pci.get_devices();
-
-        // find devices
-        auto xhc_dev    = (const pci::Device*)(nullptr);
-        auto virtio_gpu = (const pci::Device*)(nullptr);
-        auto ahci_dev   = (const pci::Device*)(nullptr);
-        for(auto i = size_t(0); i < size; i += 1) {
-            const auto& dev       = devices[i];
-            const auto  vendor_id = dev.read_vender_id();
-            logger(LogLevel::Debug, "%d.%d.%d: vend %04x, class %08x, head %02x\n", dev.bus, dev.device, dev.function, vendor_id, dev.class_code, dev.header_type);
-
-            if(dev.class_code.match(0x0Cu, 0x03u, 0x30u)) {
-                if(xhc_dev == nullptr || (xhc_dev->read_vender_id() != 0x8086 && vendor_id == 0x8086)) {
-                    xhc_dev = &dev;
-                }
-            } else if(dev.read_vender_id() == 0x1AF4 && pci::read_device_id(dev.bus, dev.device, dev.function) == (0x1040 + 16)) {
-                virtio_gpu = &dev;
-            } else if(dev.class_code.match(0x01, 0x06)) {
-                ahci_dev = &dev;
+        // -- setup xhc
+        auto xhc = std::unique_ptr<usb::xhci::Controller>();
+        if(pci_devices.xhc != nullptr) {
+            if(pci_devices.xhc->read_vender_id() == 0x8086) {
+                switch_ehci_to_xhci(pci_devices.devices, *pci_devices.xhc);
             }
-        }
-        logger(LogLevel::Debug, "pci bus scan result: %d\n", error);
-        const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
-        if(xhc_dev->configure_msi_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::Vector::XHCI, 0) &&
-           xhc_dev->configure_msix_fixed_destination(bsp_local_apic_id, pci::MSITriggerMode::Level, pci::MSIDeliveryMode::Fixed, interrupt::Vector::XHCI, 0)) {
-            logger(LogLevel::Error, "failed to configure msi for xHC device");
-        }
-
-        // find mmio address of xhc device
-        const auto xhc_bar = xhc_dev->read_bar(0);
-        if(xhc_dev != nullptr) {
-            if(xhc_bar) {
-                const auto xhc_mmio_base = xhc_bar.as_value() & ~static_cast<uint64_t>(0x0F);
-                logger(LogLevel::Debug, "xHC mmio_base = %08lx\n", xhc_mmio_base);
+            if(auto x = setup_xhc(*pci_devices.xhc)) {
+                xhc = std::move(*x);
+                usb_keyboard.reset(new devfs::USBKeyboard());
             }
         } else {
-            logger(LogLevel::Warn, "no xhc device found\n");
-        }
-        if(!xhc_bar) {
-            logger(LogLevel::Error, "failed to read xhc bar\n");
-            while(1) {
-                __asm__("hlt");
-            }
+            logger(LogLevel::Warn, "kernel: no xhc device found\n");
         }
 
-        const auto xhc_mmio_base = xhc_bar.as_value() & ~static_cast<uint64_t>(0x0F);
-        auto       xhc           = usb::xhci::Controller(xhc_mmio_base);
-        if(xhc_dev->read_vender_id() == 0x8086) {
-            switch_ehci_to_xhci(pci, *xhc_dev);
-        }
-        logger(LogLevel::Debug, "xhc initialize: %d\n", xhc.initialize());
-        fatal_assert(!xhc.run(), "failed to run xhc controller");
-
-        // connect usb devices
-        auto usb_keyboard = devfs::USBKeyboard();
-        if(fs::manager->unsafe_access().create_device_file("keyboard-usb0", &usb_keyboard)) {
-            return;
-        }
-        mouse::setup();
-        keyboard::setup(usb_keyboard);
-
-        for(auto i = 1; i <= xhc.get_max_ports(); i += 1) {
-            auto port = xhc.get_port_at(i);
-            if(port.is_connected()) {
-                if(const auto error = xhc.configure_port(port)) {
-                    logger(LogLevel::Error, "failed to configure port: %d\n", error);
-                    continue;
-                }
-            }
-        }
-
-        auto virtio_gpu_device = std::optional<virtio::gpu::GPUDevice>();
-        if(virtio_gpu != nullptr) {
-            if(auto result = virtio::gpu::initialize(*virtio_gpu)) {
-                virtio_gpu_device.emplace(std::move(result.as_value()));
+        // --- connect usb devices
+        if(usb_keyboard) {
+            if(const auto e = fs::manager->unsafe_access().create_device_file("keyboard-usb0", usb_keyboard.get())) {
+                logger(LogLevel::Error, "kernel: failed to create keyboard device file: %d\n", e.as_int());
             } else {
-                logger(LogLevel::Error, "failed to initilize virtio gpu: %d", result.as_error());
+                keyboard::setup(*usb_keyboard.get());
+            }
+        }
+        // TODO
+        // implement usb mouse device file
+        // mouse::setup();
+
+        // -- setup virtio gpu
+        auto virtio_gpu = std::unique_ptr<virtio::gpu::GPUDevice>();
+        if(pci_devices.virtio_gpu != nullptr) {
+            if(auto result = virtio::gpu::initialize(*pci_devices.virtio_gpu)) {
+                virtio_gpu.reset(new virtio::gpu::GPUDevice(std::move(result.as_value())));
+            } else {
+                logger(LogLevel::Error, "kernel: failed to initilize virtio gpu: %d", result.as_error());
             }
         }
 
+        auto virtio_gpu_framebuffer = std::unique_ptr<virtio::gpu::Framebuffer>(); // used later
+
+        // -- setup sata devices
         auto sata_controller = std::unique_ptr<ahci::Controller>();
-        if(ahci_dev != nullptr) {
-            sata_controller = ahci::initialize(*ahci_dev);
+        if(pci_devices.ahci != nullptr) {
+            sata_controller = ahci::initialize(*pci_devices.ahci);
         }
 
+        const auto kernel_pid           = process::manager->get_this_thread()->id;
+        auto       fs_device_finder_tid = process::ThreadID();
         if(sata_controller) {
-            auto& disk_finder = task::manager->new_task();
-            fatal_assert(!disk_finder.init_context(fs::device_finder_main, reinterpret_cast<int64_t>(sata_controller.get())), "failed to init context of the disk finder process");
-            disk_finder.wakeup(1);
+            const auto tid_r = process::manager->create_thread(kernel_pid, fs::device_finder_main, reinterpret_cast<int64_t>(sata_controller.get()));
+            fatal_assert(tid_r, "failed to create disk finder thread");
+            const auto tid = tid_r.as_value();
+            fatal_assert(!process::manager->wakeup_thread(kernel_pid, tid, -1), "failed to wakeup disk finder thread");
+            fs_device_finder_tid = tid;
         }
 
-        auto term_arg = terminal::TerminalMainArg{"/dev/fb-uefi0", nullptr};
-        auto term     = &task::manager->new_task();
-        fatal_assert(!term->init_context(terminal::main, reinterpret_cast<int64_t>(&term_arg)), "failed to init context of the terminal process");
-        term->wakeup();
+        // create terminal
+        auto terminal_fb_dev = "/dev/fb-uefi0";
+        {
+            const auto pid   = process::manager->create_process();
+            const auto tid_r = process::manager->create_thread(pid, terminal::main, reinterpret_cast<int64_t>(&terminal_fb_dev));
+            fatal_assert(tid_r, "failed to create terminal thread");
+            const auto tid = tid_r.as_value();
+            fatal_assert(!process::manager->wakeup_thread(pid, tid), "failed to wakeup terminal thread");
+        }
 
-        auto virtio_gpu_framebuffer = std::unique_ptr<virtio::gpu::Framebuffer>();
-
-        printk("klee.\n");
+        logger(LogLevel::Info, "kernel: initialize done\n");
 
     loop:
-        __asm__("cli");
-        const auto message = task::kernel_task->receive_message();
-        __asm__("sti");
-        if(!message) {
-            task::kernel_task->sleep();
+        const auto& messages = kernel_message_queue.swap();
+        if(messages.empty()) {
+            process::manager->sleep_this_thread();
             goto loop;
         }
 
-        // debug::println("event ", (int)message->type);
-
-        switch(message->type) {
-        case MessageType::XHCIInterrupt:
-            while(xhc.has_unprocessed_event()) {
-                if(const auto error = xhc.process_event()) {
-                    logger(LogLevel::Error, "failed to process event: %d\n", error);
+        for(const auto& m : messages) {
+            switch(m.type) {
+            case MessageType::XHCIInterrupt:
+                while(xhc->has_unprocessed_event()) {
+                    if(const auto error = xhc->process_event()) {
+                        logger(LogLevel::Error, "kernel: failed to process xhc event: %d\n", error);
+                    }
                 }
+                break;
+            case MessageType::AHCIInterrupt:
+                sata_controller->on_interrupt();
+                break;
+            case MessageType::Timer:
+                break;
+            case MessageType::VirtIOGPUNewDevice: {
+                virtio_gpu_framebuffer = virtio_gpu->create_devfs_framebuffer();
+                if(const auto e = fs::manager->access().second.create_device_file("fb-virtio0", virtio_gpu_framebuffer.get())) {
+                    logger(LogLevel::Error, "kernel: failed to create virtio gpu device file: %d\n", e.as_int());
+                }
+                terminal_fb_dev = "/dev/fb-virtio0";
+            } break;
+            case MessageType::VirtIOGPUControl:
+                if(const auto e = virtio_gpu->process_control_queue()) {
+                    logger(LogLevel::Error, "kernel: failed to process virtio gpu event: %d\n", e.as_int());
+                }
+                break;
+            case MessageType::VirtIOGPUCursor:
+                break;
+            case MessageType::DeviceFinderDone:
+                if(const auto e = process::manager->wait_thread(kernel_pid, fs_device_finder_tid)) {
+                    logger(LogLevel::Error, "kernel: failed to finish device finder thread\n");
+                }
+                break;
             }
-            break;
-        case MessageType::AHCIInterrupt:
-            sata_controller->on_interrupt();
-            break;
-        case MessageType::Timer:
-            break;
-        case MessageType::VirtIOGPUNewDevice: {
-            virtio_gpu_framebuffer = virtio_gpu_device->create_devfs_framebuffer();
-            if(const auto e = fs::manager->access().second.create_device_file("fb-virtio0", virtio_gpu_framebuffer.get())) {
-                logger(LogLevel::Error, "failed to create virtio gpu device file\n");
-            }
-            term_arg.framebuffer_path = "/dev/fb-virtio0";
-        } break;
-        case MessageType::VirtIOGPUControl:
-            if(const auto e = virtio_gpu_device->process_control_queue()) {
-                logger(LogLevel::Error, "failed to process virtio gpu event: ", e.as_int());
-            }
-            break;
-        case MessageType::VirtIOGPUCursor:
-            break;
         }
         goto loop;
     }
@@ -280,13 +324,9 @@ extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferCo
 
 // interrupt/interrupt.hpp
 namespace interrupt::internal {
-extern "C" auto int_handler_lapic_timer(task::TaskContext& context) -> void {
-    const auto task_switch = timer_manager->count_tick();
+extern "C" auto int_handler_lapic_timer(process::ThreadContext& context) -> void {
     notify_end_of_interrupt();
-
-    if(task_switch) {
-        task::manager->switch_task_may_fail(context);
-    }
+    process::manager->switch_thread_may_fail(context);
 }
 } // namespace interrupt::internal
 
@@ -297,6 +337,3 @@ extern "C" auto syscall_table = std::array<void*, 2>{
     (void*)syscall_exit,
 };
 }
-
-// task/manager.hpp
-extern "C" auto self_task_system_stack = uint64_t();

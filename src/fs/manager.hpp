@@ -141,6 +141,7 @@ inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
         [[maybe_unused]] const auto exit_code = man.set_sata_devices(std::move(sata_devices)).as_int();
     }
 
-    task::manager->get_current_task().exit();
+    process::manager->post_kernel_message_with_cli(MessageType::DeviceFinderDone);
+    process::manager->exit_this_thread();
 }
 } // namespace fs

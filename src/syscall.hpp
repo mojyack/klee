@@ -2,12 +2,13 @@
 #include "asmcode.h"
 #include "msr.hpp"
 #include "print.hpp"
+#include "process/manager.hpp"
 #include "segment.hpp"
 
 namespace syscall {
 struct Result {
-    uint64_t value;
-    Error::Code      error;
+    uint64_t    value;
+    Error::Code error;
 };
 
 using SyscallFunc = Result(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
@@ -18,8 +19,9 @@ inline auto syscall_printk(const char* const str, const uint64_t arg1, const uin
 }
 
 inline auto syscall_exit(const uint64_t arg0, const uint64_t arg1, const uint64_t arg2, const uint64_t arg3, const uint64_t arg4, const uint64_t arg5) -> Result {
-    auto& task = task::manager->get_current_task();
-    task.exit();
+    const auto                  this_thread        = process::manager->get_this_thread();
+    [[maybe_unused]] const auto user_stack_pointer = exchange_stack(this_thread->system_stack_address);
+    process::manager->exit_this_thread();
     return {0, Error::Code::Success};
 }
 

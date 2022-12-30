@@ -16,7 +16,7 @@ class Ring {
         for(auto i = 0; i < 3; i += 1) {
             buffer.get()[write_index].data[i] = data[i];
         }
-        buffer.get()[write_index].data[3] = (data[3] & 0xFFFFFFFEu) | static_cast<uint32_t>(cycle_bit);
+        buffer.get()[write_index].data[3] = (data[3] & 0xFFFF'FFFEu) | static_cast<uint32_t>(cycle_bit);
     }
 
     auto push(const std::array<uint32_t, 4>& data) -> TRB* {

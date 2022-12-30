@@ -1,8 +1,8 @@
 #pragma once
 #include "../debug.hpp"
 #include "../log.hpp"
+#include "../process/manager.hpp"
 #include "../segment.hpp"
-#include "../task/manager.hpp"
 #include "type.hpp"
 
 namespace interrupt {
@@ -43,9 +43,8 @@ __attribute__((no_caller_saved_registers)) inline auto try_kill_app(const Interr
         return;
     }
 
-    back_to_system_stack();
-    auto& task = task::manager->get_current_task();
-    task.exit();
+    exchange_stack(process::manager->get_this_thread()->system_stack_address);
+    process::manager->exit_this_thread();
 }
 
 int_handler(divide_error);

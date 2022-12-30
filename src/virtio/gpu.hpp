@@ -328,7 +328,8 @@ class GPUDevice {
                 if(setup_stage != SetupStage::Attach) {
                     break;
                 }
-                task::kernel_task->send_message(MessageType::VirtIOGPUNewDevice);
+
+                process::manager->post_kernel_message_with_cli(MessageType::VirtIOGPUNewDevice);
             } break;
             case internal::Control::SetScanout:
             case internal::Control::TransferToHost2D:

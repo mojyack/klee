@@ -5,7 +5,7 @@
 
 #include "memory-manager.hpp"
 #include "paging.hpp"
-#include "task/task.hpp"
+#include "process/process.hpp"
 
 namespace elf {
 struct ELF {
@@ -54,7 +54,7 @@ struct LoadedELF {
 
 static_assert(paging::bytes_per_page == bytes_per_frame);
 
-inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdpt, task::Task& task) -> Result<LoadedELF> {
+inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdpt, process::Process* const process, const process::AutoLock& lock) -> Result<LoadedELF> {
     const auto bytes_limit = image.get_frames() * bytes_per_frame;
     const auto image_addr  = reinterpret_cast<uint8_t*>(image->get_frame());
 
@@ -96,7 +96,7 @@ inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdp
         paging::map_virtual_to_physical(&pdpt, virtual_addr, physical_addr, paging::Attribute::UserExecute | paging::Attribute::Write);
     }
 
-    task.apply_page_map();
+    process->apply_page_map(lock);
 
     for(auto i = 0; i < elf.program_header_limit; i += 1) {
         const auto& ph = *reinterpret_cast<ProgramHeader*>(program_headers + elf.program_header_size * i);

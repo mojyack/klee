@@ -82,7 +82,7 @@ class SATADevice {
             return true;
         }
         if(port->is.bits.tfes) {
-            logger(LogLevel::Error, "[ahci] task file error\n");
+            logger(LogLevel::Error, "ahci: task file error\n");
             return false;
         }
         goto loop;
@@ -97,7 +97,7 @@ class SATADevice {
 
         const auto slot = port->find_lazy_command_slot(num_command_slots);
         if(slot == -1) {
-            logger(LogLevel::Error, "[ahci] cannot find free slot\n");
+            logger(LogLevel::Error, "ahci: cannot find free slot\n");
             return false;
         }
 
@@ -105,7 +105,7 @@ class SATADevice {
         const auto     num_prd = (bytes_transfer + dbc_max - 1) / dbc_max;
 
         if(bytes_transfer > buffer_size) {
-            logger(LogLevel::Error, "[ahci] buffer too small\n");
+            logger(LogLevel::Error, "ahci: buffer too small\n");
             return false;
         }
 
@@ -136,7 +136,7 @@ class SATADevice {
         }
 
         if(spin == spin_max) {
-            logger(LogLevel::Error, "[ahci] port hung detected\n");
+            logger(LogLevel::Error, "ahci: port hung detected\n");
             return false;
         }
 
@@ -172,7 +172,7 @@ class SATADevice {
                     model_name[i * 2]     = (w & 0xFF00) >> 8;
                     model_name[i * 2 + 1] = w & 0xFF;
                 }
-                logger(LogLevel::Debug, "[ahci] disk identified: \"%.20s\" %luMiB\n", model_name.data(), lba_size * bytes_per_sector / 1024 / 1024);
+                logger(LogLevel::Info, "ahci: disk identified: \"%.20s\" %luMiB\n", model_name.data(), lba_size * bytes_per_sector / 1024 / 1024);
                 identify_buffer.reset();
                 identify_sync->count++;
                 identify_sync->event.notify();
@@ -285,17 +285,18 @@ class Controller {
         for(auto& d : this->ports) {
             d.identify(identify_sync);
         }
-        task::kernel_task->send_message(MessageType::AHCIInterrupt);
+
+        process::manager->post_kernel_message_with_cli(MessageType::AHCIInterrupt);
     }
 };
 
 inline auto initialize(const pci::Device& dev) -> std::unique_ptr<Controller> {
     using namespace internal;
 
-    logger(LogLevel::Debug, "[ahci] controller found at %d.%d.%d\n", dev.bus, dev.device, dev.function);
+    logger(LogLevel::Debug, "ahci: controller found at %d.%d.%d\n", dev.bus, dev.device, dev.function);
     const auto abar = dev.read_bar(5);
     if(!abar) {
-        logger(LogLevel::Error, "[ahci] failed to read bar\n");
+        logger(LogLevel::Error, "ahci: failed to read bar\n");
         return nullptr;
     }
 
@@ -303,7 +304,7 @@ inline auto initialize(const pci::Device& dev) -> std::unique_ptr<Controller> {
     volatile auto& hba_header = *reinterpret_cast<HBAHeader*>(hba_addr);
 
     if(!hba_header.cap.s64a) {
-        logger(LogLevel::Error, "[ahci] hba does not support 64-bit addressing\n");
+        logger(LogLevel::Error, "ahci: hba does not support 64-bit addressing\n");
         return nullptr;
     }
 
@@ -333,7 +334,7 @@ inline auto initialize(const pci::Device& dev) -> std::unique_ptr<Controller> {
             continue;
         }
 
-        logger(LogLevel::Debug, "[ahci] port %d = ", i);
+        logger(LogLevel::Debug, "ahci: port %d = ", i);
 
         switch(port.sig) {
         case HBAPort::Signature::ATA:
@@ -384,7 +385,8 @@ inline auto initialize(const pci::Device& dev) -> std::unique_ptr<Controller> {
 
     const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
     if(const auto error = dev.configure_msi_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::AHCI, 0)) {
-        logger(LogLevel::Error, "[ahci] failed to setup msi: %d\n", error.as_int());
+        logger(LogLevel::Error, "ahci: failed to setup msi: %d\n", error.as_int());
+        return nullptr;
     }
     return std::unique_ptr<Controller>(new Controller(hba_header, std::move(devices)));
 }

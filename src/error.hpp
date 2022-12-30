@@ -29,6 +29,14 @@ class [[nodiscard]] Error {
         NoSuchTask,
         BadChecksum,
         EntryNotSet,
+        // process manager
+        InvalidNice,
+        NoSuchEvent,
+        UnFinishedEvent,
+        AlivingThread,
+        DeadThread,
+        NoSuchProcess,
+        NoSuchThread,
         // filesystem
         IOError,
         InvalidData,

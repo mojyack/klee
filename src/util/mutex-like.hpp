@@ -1,12 +1,13 @@
 #pragma once
 #include <optional>
 
+namespace mutex_like {
 template <class T>
 concept MutexLike = requires(T& mutex) {
-    mutex.aquire();
-    mutex.try_aquire();
-    mutex.release();
-};
+                        mutex.aquire();
+                        mutex.try_aquire();
+                        mutex.release();
+                    };
 
 using LockedMutex           = bool;
 constexpr auto locked_mutex = LockedMutex(true);
@@ -16,17 +17,20 @@ class AutoMutex {
   private:
     Mutex* mutex = nullptr;
 
+  public:
     auto release() -> void {
         if(mutex != nullptr) {
             mutex->release();
         }
     }
 
-  public:
+    auto get_raw_mutex() -> Mutex* {
+        return mutex;
+    }
+
     AutoMutex(AutoMutex&& o) {
         release();
-        mutex   = o.mutex;
-        o.mutex = nullptr;
+        mutex = std::exchange(o.mutex, nullptr);
     }
 
     AutoMutex(Mutex& mutex) : mutex(&mutex) {
@@ -66,3 +70,4 @@ class SharedValue {
     SharedValue(Args&&... args) : data(std::move(args)...) {}
     SharedValue() {}
 };
+} // namespace mutex_like

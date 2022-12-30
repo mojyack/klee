@@ -14,7 +14,7 @@ inline auto operator<=>(const LogLevel lhs, const LogLevel rhs) {
 
 class Logger {
   private:
-    LogLevel log_level = LogLevel::Error;
+    LogLevel log_level = LogLevel::Debug;
 
   public:
     auto set_log_level(const LogLevel level) -> void {

@@ -96,6 +96,10 @@ auto itos(const T value) -> std::array<char, sizeof(T) * 2 + 1> {
 }
 
 inline auto draw_ascii(const Point point, const char c) -> void {
+    if(fb == nullptr) {
+        return;
+    }
+
     const auto font = get_font(c);
     for(auto y = 0; y < get_font_size()[1]; y += 1) {
         for(auto x = 0; x < get_font_size()[0]; x += 1) {
