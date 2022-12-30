@@ -560,7 +560,7 @@ class Manager {
             kernel_thread = this_thread;
         }
         {
-            const auto pid        = create_process();
+            const auto pid        = this_thread->process->id;
             const auto tid_result = create_thread(pid, idle_main, 0);
             fatal_assert(tid_result, "failed to create idle thread");
             const auto tid = tid_result.as_value();
