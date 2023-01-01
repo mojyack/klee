@@ -168,13 +168,11 @@ class Queue {
                                                                                                                                      queue_number(queue_number),
                                                                                                                                      queue_select(queue_select),
                                                                                                                                      notify_address(notify_address) {
-        {
-            const auto frames = allocator->allocate(size);
-            if(!frames) {
-                logger(LogLevel::Error, "failed to allocate frames for virtio device: %d\n", frames.as_error());
-                return;
-            }
-            frame_id = SmartFrameID(frames.as_value(), size);
+        if(auto r = allocator->allocate(size); !r) {
+            logger(LogLevel::Error, "virtio: failed to allocate frames for virtio device: %d\n", r.as_error());
+            return;
+        } else {
+            frame_id = std::move(r.as_value());
         }
 
         for(auto i = size_t(0); i < size; i += 1) {

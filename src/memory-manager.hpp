@@ -3,9 +3,9 @@
 #include <limits>
 
 #include "error.hpp"
-#include "panic.hpp"
 #include "libc-support.hpp"
 #include "memory-map.h"
+#include "panic.hpp"
 
 #define MM_DEBUG_PRINT 0
 #if MM_DEBUG_PRINT == 1
@@ -52,6 +52,50 @@ class FrameID {
 
 inline auto nullframe = FrameID(std::numeric_limits<size_t>::max());
 
+class SmartFrameID {
+  private:
+    FrameID id = nullframe;
+    size_t  frames;
+
+  public:
+    auto free() -> void;
+
+    auto get_frames() const -> size_t {
+        return frames;
+    }
+
+    auto operator=(SmartFrameID&& o) -> SmartFrameID& {
+        free();
+        std::swap(id, o.id);
+        frames = o.frames;
+        return *this;
+    }
+
+    auto operator->() -> FrameID* {
+        return &id;
+    }
+
+    auto operator*() -> FrameID {
+        return id;
+    }
+
+    operator bool() const {
+        return id != nullframe;
+    }
+
+    SmartFrameID(SmartFrameID&& o) {
+        *this = std::move(o);
+    }
+
+    SmartFrameID() = default;
+
+    SmartFrameID(const FrameID id, const size_t frames) : id(id), frames(frames) {}
+
+    ~SmartFrameID() {
+        free();
+    }
+};
+
 class BitmapMemoryManager {
   private:
     using MaplineType = uint64_t;
@@ -92,7 +136,7 @@ class BitmapMemoryManager {
     }
 
   public:
-    auto allocate(const size_t frames) -> Result<FrameID> {
+    auto allocate(const size_t frames) -> Result<SmartFrameID> {
         auto start_frame_id = range_begin.get_id();
     loop:
         auto i = size_t(0);
@@ -107,7 +151,7 @@ class BitmapMemoryManager {
         if(i == frames) {
             auto r = FrameID(start_frame_id);
             set_bits(r, frames, true);
-            return r;
+            return SmartFrameID(r, frames);
         }
         start_frame_id += i + 1;
         goto loop;
@@ -127,17 +171,18 @@ class BitmapMemoryManager {
         return !get_bit(frame);
     }
 
-    auto initialize_heap() -> Error {
+    auto initialize_heap() -> Result<SmartFrameID> {
         constexpr auto heap_frames = 64 * 512;
 
-        const auto heap_start = allocate(heap_frames);
-        if(!heap_start) {
-            return heap_start.as_error();
+        auto heap_start_r = allocate(heap_frames);
+        if(!heap_start_r) {
+            return heap_start_r.as_error();
         }
+        auto& heap_start = heap_start_r.as_value();
 
-        program_break     = reinterpret_cast<caddr_t>(heap_start.as_value().get_id() * bytes_per_frame);
+        program_break     = reinterpret_cast<caddr_t>(heap_start->get_id() * bytes_per_frame);
         program_break_end = program_break + heap_frames * bytes_per_frame;
-        return Success();
+        return std::move(heap_start);
     }
 
 #if MM_DEBUG_PRINT == 1
@@ -179,44 +224,9 @@ class BitmapMemoryManager {
 
 inline auto allocator = (BitmapMemoryManager*)(nullptr);
 
-class SmartFrameID {
-  private:
-    FrameID id = nullframe;
-    size_t  frames;
-
-  public:
-    auto get_frames() const -> size_t {
-        return frames;
+inline auto SmartFrameID::free() -> void {
+    if(id != nullframe) {
+        fatal_assert(!allocator->deallocate(id, frames), "failed to deallocate memory");
+        id = nullframe;
     }
-
-    auto operator=(SmartFrameID&& o) -> SmartFrameID& {
-        if(id != nullframe) {
-            fatal_assert(!allocator->deallocate(id, frames), "failed to deallocate memory");
-        }
-
-        id     = o.id;
-        frames = o.frames;
-        o.id   = nullframe;
-        return *this;
-    }
-
-    auto operator->() -> FrameID* {
-        return &id;
-    }
-
-    auto operator*() -> FrameID {
-        return id;
-    }
-
-    SmartFrameID(SmartFrameID&& o) {
-        *this = std::move(o);
-    }
-
-    SmartFrameID() = default;
-    SmartFrameID(const FrameID id, const size_t frames) : id(id), frames(frames) {}
-    ~SmartFrameID() {
-        if(id != nullframe) {
-            fatal_assert(!allocator->deallocate(id, frames), "failed to deallocate memory");
-        }
-    }
-};
+}

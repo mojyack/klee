@@ -172,24 +172,28 @@ struct MADT {
 inline auto fadt = (const FADT*)(nullptr);
 inline auto madt = (const MADT*)(nullptr);
 
-inline auto wait_miliseconds(const uint64_t ms) -> void {
-    constexpr auto pm_timer_freq = 3579545;
+inline auto wait_microseconds(const uint64_t us) -> void {
+    constexpr auto pm_timer_freq = 3579545; // Hz
 
     const auto pm_timer_32 = bool((fadt->flags >> 8) & 1);
     const auto start       = io_read32(fadt->pm_tmr_blk);
-    auto       end         = start + pm_timer_freq * ms / 1000;
+    auto       end         = start + pm_timer_freq * us / 1'000'000;
     if(!pm_timer_32) {
-        end &= 0x00ffffffu;
+        end &= 0x00'FF'FF'FFu;
     }
 
     if(end < start) { // overflow
         while(io_read32(fadt->pm_tmr_blk) >= start) {
-            //
+            __asm__("pause");
         }
     }
     while(io_read32(fadt->pm_tmr_blk) < end) {
-        //
+        __asm__("pause");
     }
+}
+
+inline auto wait_miliseconds(const uint64_t ms) -> void {
+    wait_microseconds(ms * 1000);
 }
 
 inline auto initialize(RSDP& rsdp) -> bool {

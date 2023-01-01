@@ -10,18 +10,28 @@
 #include "paging.hpp"
 #include "panic.hpp"
 #include "segment.hpp"
+#include "smp/ap.hpp"
+#include "smp/id.hpp"
 #include "syscall.hpp"
 #include "terminal.hpp"
 #include "timer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
+#include "processor-resource.hpp"
+
+alignas(0x1000) static auto pml4_table = paging::PML4Table();
 
 class Kernel {
   private:
+    segment::GDT         gdt;
+    segment::TSSResource tss_resource;
+
     BitmapMemoryManager memory_manager;
     FramebufferConfig   framebuffer_config;
     acpi::RSDP&         rsdp;
+
+    std::vector<std::unique_ptr<ProcessorResource>> processor_resources;
 
     static auto switch_ehci_to_xhci(const std::vector<pci::Device>& devices, const pci::Device& xhc_dev) -> void {
         auto intel_ehc_exist = false;
@@ -119,12 +129,105 @@ class Kernel {
         return std::move(xhc);
     }
 
+    static auto ap_main(smp::APBootParameter* const parameter) -> void {
+        parameter->notify = 1;
+        apply_segments(*parameter->gdt);
+        apply_pml4_table(*parameter->pml4_table);
+
+        auto tss_resource = segment::TSSResource();
+        if(auto r = segment::setup_tss(*parameter->gdt); !r) {
+            while(1) __asm__("hlt");
+        } else {
+            tss_resource = std::move(r.as_value());
+        }
+        interrupt::initialize();
+        syscall::initialize_syscall();
+
+        logger(LogLevel::Info, "kernel: processor %u ready\n", smp::get_processor_number());
+        while(1) __asm__("hlt");
+    }
+
+    auto boot_ap(const FrameID trampoline_page, const uint8_t lapic_id) -> Error {
+        constexpr auto n_stack_frames = 1;
+
+        auto resource = processor_resources.emplace_back(new(std::nothrow) ProcessorResource).get();
+        if(!resource) {
+            return Error::Code::NoEnoughMemory;
+        }
+        if(auto r = allocator->allocate(n_stack_frames); !r) {
+            return r.as_error();
+        } else {
+            resource->stack = std::move(r.as_value());
+        }
+
+        segment::create_segments(resource->gdt);
+        paging::create_identity_page_table(resource->pml4_table);
+
+        const auto boot_parameter = smp::APBootParameter{&resource->gdt, &resource->pml4_table, 0};
+        const auto stack_ptr = std::bit_cast<uint64_t>(resource->stack->get_frame()) + bytes_per_frame * n_stack_frames;
+        smp::start_ap(trampoline_page, lapic_id, &ap_main, stack_ptr, &boot_parameter);
+        processor_resources.emplace_back(std::move(resource));
+
+        while(boot_parameter.notify == 0) {
+            __asm__("pause");
+        }
+        return Success();
+    }
+
+    auto boot_aps(const FrameID trampoline_page) -> Error {
+        const auto bsp_id = lapic::read_lapic_id();
+        const auto ids             = acpi::detect_cores().lapic_ids;
+
+        // create lapic_id to processor number table
+        smp::lapic_id_to_index_table = new(std::nothrow) size_t[*std::max_element(ids.begin(), ids.end())];
+        fatal_assert(smp::lapic_id_to_index_table != nullptr, "no enough memory");
+
+        smp::lapic_id_to_index_table[bsp_id] = 0;
+        for(auto i = 0, n = 1; i < ids.size(); i += 1) {
+            if(ids[i] == bsp_id) {
+                continue;
+            }
+            smp::lapic_id_to_index_table[ids[i]] = n;
+            n += 1;
+
+            logger(LogLevel::Info, "kernel: cpu core %d detected: lapic_id = %u\n", i, ids[i]);
+        }
+
+        // boot aps
+        for(const auto id : ids) {
+            if(id == bsp_id) {
+                continue;
+            }
+            if(const auto e = boot_ap(trampoline_page, id)) {
+                logger(LogLevel::Error, "kernel: failed to boot ap: %d\n", e.as_int());
+            }
+        }
+        return Success();
+    }
+
   public:
     auto run() -> void {
         // setup memory manager
-        segment::setup_segments();
-        paging::setup_identity_page_table();
-        fatal_assert(!memory_manager.initialize_heap(), "failed to initialize heap memory");
+        segment::create_segments(gdt);
+        segment::apply_segments(gdt);
+        paging::create_identity_page_table(pml4_table);
+        paging::apply_pml4_table(pml4_table);
+        // - allocate lowest page for ap startup
+        auto kernel_heap        = SmartFrameID();
+        auto ap_trampoline_page = SmartFrameID();
+        {
+            auto r = memory_manager.allocate(1);                // this allocate must be performed before heap initialize
+            if(auto r = memory_manager.initialize_heap(); !r) { // initialize heap here for printk
+                fatal_error("failed to initialize heap memory");
+            } else {
+                kernel_heap = std::move(r.as_value());
+            }
+            if(!r) {
+                printk("kernel: failed to allocate pages for ap startup; %d\n", r.as_error());
+            } else {
+                ap_trampoline_page = std::move(r.as_value());
+            }
+        }
         allocator = &memory_manager;
 
         // create debug output
@@ -135,7 +238,7 @@ class Kernel {
 
         // create task manager
         // mutex needs this
-        auto pm          = process::Manager();
+        auto pm          = process::Manager(pml4_table);
         process::manager = &pm;
 
         // create filesystem mananger
@@ -159,24 +262,20 @@ class Kernel {
         }
 
         // initialize tss
-        if(const auto e = segment::setup_tss()) {
-            fatal_error("failed to setup tss: ", e.as_int());
+        if(auto r = segment::setup_tss(gdt); !r) {
+            fatal_error("failed to setup tss: ", r.as_error().as_int());
+        } else {
+            tss_resource = std::move(r.as_value());
         }
-
-        // initialize syscall
-        syscall::initialize_syscall();
 
         // initialize acpi
         if(!acpi::initialize(rsdp)) {
             fatal_error("failde to initialize acpi");
             return;
         }
-        if(acpi::madt != nullptr) {
-            const auto cores = acpi::detect_cores();
-            for(auto i = 0; i < cores.lapic_ids.size(); i += 1) {
-                logger(LogLevel::Info, "kernel: cpu core %d detected: lapic_id = %u\n", i, cores.lapic_ids[i]);
-            }
-        }
+
+        // initialize syscall
+        syscall::initialize_syscall();
 
         // start timer
         timer::initialize_timer();
@@ -203,6 +302,8 @@ class Kernel {
         } else {
             logger(LogLevel::Warn, "kernel: no xhc device found\n");
         }
+
+        printk("pml4 at %x\n", pml4_table.data());
 
         // --- connect usb devices
         if(usb_keyboard) {
@@ -243,6 +344,14 @@ class Kernel {
             fatal_assert(!process::manager->wakeup_thread(kernel_pid, tid, -1), "failed to wakeup disk finder thread");
             fs_device_finder_tid = tid;
         }
+
+        // boot aps
+        if(acpi::madt != nullptr) {
+            if(const auto e = boot_aps(*ap_trampoline_page)) {
+                logger(LogLevel::Error, "kernel: ap boot failed: %d\n", e.as_int());
+            }
+        }
+        ap_trampoline_page.free();
 
         // create terminal
         auto terminal_fb_dev = "/dev/fb-uefi0";

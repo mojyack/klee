@@ -1,13 +1,21 @@
-SHELL = /bin/zsh
-TARGET = x86_64-elf
-INCLUDES = $(addprefix -I, $(BUILDENV)/include/c++/v1 $(BUILDENV)/include $(BUILDENV)/include/freetype2 $(abspath edk2/MdePkg/Include) $(abspath edk2/MdePkg/Include/X64))
-COMMON_FLAGS = -O3 -Wall -Wfatal-errors --target=$(TARGET) -nostdlibinc -ffreestanding -mlong-double-64 -U__linux__ -D__ELF__ -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
+SHELL        = /bin/zsh
+TARGET       = x86_64-elf
+INCLUDES     = $(addprefix -I, \
+                   $(BUILDENV)/include/c++/v1 \
+                   $(BUILDENV)/include  \
+                   $(BUILDENV)/include/freetype2 \
+                   $(abspath edk2/MdePkg/Include) \
+                   $(abspath edk2/MdePkg/Include/X64) \
+               )
+COMMON_FLAGS = -O3 -Wall -Wfatal-errors --target=$(TARGET) \
+               -nostdlibinc -ffreestanding -mlong-double-64 \
+               -U__linux__ -D__ELF__ -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
 CXX = clang++ -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 -Wno-address-of-packed-member -march=x86-64-v2 $(INCLUDES) $(COMMON_FLAGS) -c
 LIBRARY = $(BUILDENV)/lib
 
 ifndef BUILDENV
-$(warning BUILDENV is not set)
-BUILDENV = $(abspath ../klee-buildenv/x86_64-elf)
+    $(warning BUILDENV is not set)
+    BUILDENV = $(abspath ../klee-buildenv/x86_64-elf)
 endif
 
 .PHONY: all run apps clean
@@ -34,6 +42,9 @@ out/asmcode.o: src/asmcode.asm
 out/process.o: src/process/process.asm
 	nasm -f elf64 -o $@ $<
 
+out/trampoline.o: src/smp/trampoline.asm
+	nasm -f elf64 -o $@ $<
+
 out/libc-support.o: src/libc-support.cpp
 	${CXX} -o $@ $<
 
@@ -50,7 +61,7 @@ out/font.o: src/font.txt
 	--redefine-sym _binary_out_font_bin_size=font_limit \
 	$@ $@
 
-out/kernel.elf: out/main.o out/stub.o out/font.o out/asmcode.o out/process.o out/libc-support.o
+out/kernel.elf: out/main.o out/stub.o out/font.o out/asmcode.o out/process.o out/trampoline.o out/libc-support.o
 	ld.lld --entry kernel_entry -z norelro --image-base 0x100000 --static -lc -lm -lc++ -lc++abi -L${LIBRARY} -o $@ $^
 
 out/volume:

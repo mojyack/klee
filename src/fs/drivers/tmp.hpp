@@ -95,11 +95,11 @@ class File : public Object {
         if(new_data_size > old_data_size) {
             auto new_frames = std::vector<SmartFrameID>(new_data_size - old_data_size);
             for(auto& f : new_frames) {
-                auto frame = allocator->allocate(1);
-                if(!frame) {
-                    return frame.as_error();
+                if(auto r = allocator->allocate(1); !r) {
+                    return r.as_error();
+                } else {
+                    f = std::move(r.as_value());
                 }
-                f = SmartFrameID(frame.as_value(), 1);
             }
             data.reserve(new_data_size);
             std::move(std::begin(new_frames), std::end(new_frames), std::back_inserter(data));

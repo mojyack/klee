@@ -51,6 +51,8 @@ class Manager {
     const EventID process_joined_event;
     Thread*       kernel_thread;
 
+    paging::PML4Table& pml4_table;
+
     static auto idle_main(const uint64_t id, const int64_t data) -> void {
         while(true) {
             __asm__("hlt");
@@ -71,7 +73,7 @@ class Manager {
         {
             const auto process = next_thread->process;
             const auto lock    = AutoLock(process->page_map_mutex);
-            process->apply_page_map(lock);
+            process->apply_page_map(lock, pml4_table);
         }
         alignas(16) const auto next_context = next_thread->context;
         switch_context(&next_context, &current_thread->context, lock.get_raw_mutex()->get_native());
@@ -93,7 +95,7 @@ class Manager {
         {
             const auto process = next_thread->process;
             const auto lock    = AutoLock(process->page_map_mutex);
-            process->apply_page_map(lock);
+            process->apply_page_map(lock, pml4_table);
         }
         const auto next_context = next_thread->context;
         lock.release();
@@ -543,8 +545,9 @@ class Manager {
         fatal_assert(wakeup_thread(lock, kernel_thread) == Error::Code::Success, "failed to wakeup kernel thread");
     }
 
-    Manager() : thread_joined_event(create_event()),
-                process_joined_event(create_event()) {
+    Manager(paging::PML4Table& pml4_table) : thread_joined_event(create_event()),
+                                             process_joined_event(create_event()),
+                                             pml4_table(pml4_table) {
         {
             const auto pid        = create_process();
             const auto tid_result = create_thread(pid);

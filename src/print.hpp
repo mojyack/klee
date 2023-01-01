@@ -3,8 +3,9 @@
 #include <span>
 #include <string_view>
 
-#include "stdio.h"
 #include "debug.hpp"
+#include "stdio.h"
+#include "util/spinlock.hpp"
 
 struct PrintBuffer {
     static constexpr auto buffer_size = 1024 * 4;
@@ -12,12 +13,15 @@ struct PrintBuffer {
     std::array<char, buffer_size> buffer;
     size_t                        head = 0;
     size_t                        len  = 0;
+    spinlock::SpinLock lock;
 };
 
 inline auto printk_buffer = PrintBuffer();
 
 inline auto printk(std::span<char> buf) -> int {
     debug::println(std::string_view(buf.data(), buf.size()));
+
+    const auto lock = mutex_like::AutoMutex<spinlock::SpinLock>(printk_buffer.lock);
 
     const auto buf_len = buf.size();
 

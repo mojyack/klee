@@ -94,8 +94,8 @@ struct Process {
 
     IDMap<ThreadID, Thread> threads;
 
-    auto apply_page_map(const AutoLock& /*lock*/) -> void {
-        auto& pml4e = paging::pml4_table[0b100000000];
+    auto apply_page_map(const AutoLock& /*lock*/, paging::PML4Table& pml4_table) -> void {
+        auto& pml4e = pml4_table[0b100000000];
         if(page_map) {
             pml4e.data              = reinterpret_cast<uint64_t>(page_map->upper_page_map.data.data());
             pml4e.directory.present = 1;

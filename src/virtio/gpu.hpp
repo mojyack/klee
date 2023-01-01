@@ -296,11 +296,11 @@ class GPUDevice {
                 const auto resource_id = reinterpret_cast<internal::ResourceCreate2DRequest*>(request_data)->resource_id;
                 const auto fb_bytes    = display_size[0] * display_size[1] * 4;
                 const auto fb_frames   = (fb_bytes + bytes_per_frame - 1) / bytes_per_frame;
-                if(const auto f = allocator->allocate(fb_frames)) {
-                    framebuffer.first[resource_id - 1] = SmartFrameID(f.as_value(), fb_frames);
-                    framebuffer.second                 = fb_frames;
+                if(auto r = allocator->allocate(fb_frames); !r) {
+                    logger(LogLevel::Error, "virtio: gpu: failed to get allocate framebuffer %d\n", r.as_error());
                 } else {
-                    logger(LogLevel::Error, "failed to get allocate framebuffer %d\n", f.as_error());
+                    framebuffer.first[resource_id - 1] = std::move(r.as_value());
+                    framebuffer.second                 = fb_frames;
                 }
 
                 const auto b  = static_cast<uint8_t*>(control_queue.get_next_descriptor_buffer(sizeof(internal::ControlHeader) + sizeof(internal::ResourceAttachBackingRequest) + sizeof(internal::ResourceAttachBackingRequest::MemEntry)));

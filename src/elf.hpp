@@ -83,11 +83,11 @@ inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdp
     for(auto i = 0; i < allocated_frames.size(); i += 1) {
         auto& f = allocated_frames[i];
 
-        const auto new_frame = allocator->allocate(1);
-        if(!new_frame) {
-            return new_frame.as_error();
+        if(auto r = allocator->allocate(1); !r) {
+            return r.as_error();
+        } else {
+            f = std::move(r.as_value());
         }
-        f = SmartFrameID(new_frame.as_value(), 1);
 
         const auto physical_addr = reinterpret_cast<uint64_t>(f->get_frame());
         const auto virtual_addr  = segment_first + paging::bytes_per_page * i;
@@ -96,7 +96,8 @@ inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdp
         paging::map_virtual_to_physical(&pdpt, virtual_addr, physical_addr, paging::Attribute::UserExecute | paging::Attribute::Write);
     }
 
-    process->apply_page_map(lock);
+    // TODO
+    // process->apply_page_map(lock);
 
     for(auto i = 0; i < elf.program_header_limit; i += 1) {
         const auto& ph = *reinterpret_cast<ProgramHeader*>(program_headers + elf.program_header_size * i);

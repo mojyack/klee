@@ -86,7 +86,7 @@ struct TaskStateSegment {
     uint16_t iopb;
 } __attribute__((packed));
 
-static auto gdt = std::array<SegmentDescriptor, 7>();
+using GDT = std::array<SegmentDescriptor, 7>;
 
 enum SegmentNumber : uint16_t {
     Null        = 0,
@@ -102,36 +102,54 @@ constexpr auto kernel_cs = segment::SegmentSelector{.bits = {.index = segment::S
 constexpr auto kernel_ss = segment::SegmentSelector{.bits = {.index = segment::SegmentNumber::KernelStack}};
 constexpr auto kernel_ds = segment::SegmentSelector{.bits = {.index = segment::SegmentNumber::Null}};
 
-inline auto setup_segments() -> void {
+inline auto create_segments(GDT& gdt) -> void {
     gdt[SegmentNumber::Null].data = 0;
     gdt[SegmentNumber::KernelCode].set_code_segment(DescriptorType::ExecuteRead, 0, 0, 0x0FFFFF);
     gdt[SegmentNumber::KernelStack].set_data_segment(DescriptorType::ReadWrite, 0, 0, 0x0FFFFF);
     gdt[SegmentNumber::UserCode].set_code_segment(DescriptorType::ExecuteRead, 3, 0, 0x0FFFFF);
     gdt[SegmentNumber::UserStack].set_data_segment(DescriptorType::ReadWrite, 3, 0, 0x0FFFFF);
-    load_gdt(sizeof(gdt) - 1, reinterpret_cast<uintptr_t>(gdt.data()));
+}
 
+inline auto apply_segments(GDT& gdt) -> void {
+    load_gdt(sizeof(GDT) - 1, reinterpret_cast<uintptr_t>(gdt.data()));
     set_dsall(kernel_ds.data);
     set_csss(kernel_cs.data, kernel_ss.data);
 }
 
-inline auto setup_tss() -> Error {
-    static auto rsp_stack = SmartFrameID();
-    static auto rst_stack = SmartFrameID();
-    static auto tss       = TaskStateSegment();
+struct TSSResource {
+    std::unique_ptr<TaskStateSegment> tss;
+    SmartFrameID                      rsp_stack;
+    SmartFrameID                      rst_stack;
+};
 
-    value_or(rsp_stack_raw, allocator->allocate(1));
-    rsp_stack = SmartFrameID(rsp_stack_raw, 1);
-    tss.rsp0  = reinterpret_cast<uint64_t>(static_cast<uint8_t*>(rsp_stack->get_frame()) + bytes_per_frame);
+inline auto setup_tss(GDT& gdt) -> Result<TSSResource> {
+    auto rsp_stack = SmartFrameID();
+    if(auto r = allocator->allocate(1); !r) {
+        return r.as_error();
+    } else {
+        rsp_stack = std::move(r.as_value());
+    }
 
-    value_or(rst_stack_raw, allocator->allocate(1));
-    rst_stack                                   = SmartFrameID(rst_stack_raw, 1);
-    tss.ist[interrupt::ist_for_lapic_timer - 1] = reinterpret_cast<uint64_t>(static_cast<uint8_t*>(rst_stack->get_frame()) + bytes_per_frame);
+    auto rst_stack = SmartFrameID();
+    if(auto r = allocator->allocate(1); !r) {
+        return r.as_error();
+    } else {
+        rst_stack = std::move(r.as_value());
+    }
 
-    const auto tss_addr = reinterpret_cast<uint64_t>(&tss);
+    auto tss = std::unique_ptr<TaskStateSegment>(new(std::nothrow) TaskStateSegment);
+    if(!tss) {
+        return Error::Code::NoEnoughMemory;
+    }
+
+    tss->rsp0                                    = std::bit_cast<uint64_t>(static_cast<std::byte*>(rsp_stack->get_frame()) + bytes_per_frame);
+    tss->ist[interrupt::ist_for_lapic_timer - 1] = std::bit_cast<uint64_t>(static_cast<std::byte*>(rst_stack->get_frame()) + bytes_per_frame);
+
+    const auto tss_addr = reinterpret_cast<uint64_t>(tss.get());
     gdt[TSSLow].set_system_segment(DescriptorType::TSSAvailable, 0, tss_addr & 0xFFFFFFFFu, sizeof(tss) - 1);
     gdt[TSSHigh].data = tss_addr >> 32;
     load_tr(SegmentSelector{.bits = {0, 0, TSSLow}}.data);
-    return Success();
+    return TSSResource{std::move(tss), std::move(rsp_stack), std::move(rst_stack)};
 }
 } // namespace segment
 

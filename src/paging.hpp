@@ -171,9 +171,10 @@ enum Attribute : int {
     UserExecute = User | Execute,
 };
 
-alignas(4096) inline auto pml4_table = std::array<PML4Entry, 512>();
+// must be page aligned (alignas(4096))
+using PML4Table = std::array<PML4Entry, 512>;
 
-inline auto setup_identity_page_table() -> void {
+inline auto create_identity_page_table(PML4Table& pml4_table) -> void {
     constexpr auto page_size_4k = size_t(4096);
     constexpr auto page_size_2m = 512 * page_size_4k;
     constexpr auto page_size_1g = 512 * page_size_2m;
@@ -203,7 +204,9 @@ inline auto setup_identity_page_table() -> void {
             pde.frame.page_size = 1;
         }
     }
+}
 
+inline auto apply_pml4_table(PML4Table& pml4_table) {
     set_cr3(reinterpret_cast<uint64_t>(pml4_table.data()));
 }
 

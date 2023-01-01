@@ -436,7 +436,7 @@ class Shell {
                 close_handle(std::move(handle));
                 return true;
             }
-            auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(code_frames_result.as_value(), num_frames));
+            auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(std::move(code_frames_result.as_value())));
             if(const auto read = handle.read(0, handle.get_filesize(), (*code_frames)->get_frame()); !read) {
                 print("file read error: %d\n", read.as_error().as_int());
                 close_handle(std::move(handle));

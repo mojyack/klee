@@ -34,8 +34,8 @@ inline auto elf_prepare(const uint64_t data, Thread* const thread) -> std::optio
         logger(LogLevel::Error, "failed to allocate frame for application stack");
         return std::nullopt;
     }
-    paging::map_virtual_to_physical(&process->page_map->upper_page_map, stack_frame_addr, reinterpret_cast<uintptr_t>(stack_frame.as_value().get_frame()), paging::Attribute::UserWrite);
-    process->page_map->allocated_frames.emplace_back(stack_frame.as_value(), 1);
+    paging::map_virtual_to_physical(&process->page_map->upper_page_map, stack_frame_addr, reinterpret_cast<uintptr_t>(stack_frame.as_value()->get_frame()), paging::Attribute::UserWrite);
+    process->page_map->allocated_frames.emplace_back(std::move(stack_frame.as_value()));
 
     return PrepareResult{.entry = std::bit_cast<uint64_t>(elf_info.entry), .stack = stack_frame_addr + (0x1000 - 8)};
 }
