@@ -170,7 +170,7 @@ class Kernel {
         paging::create_identity_page_table(resource->pml4_table);
 
         const auto boot_parameter = smp::APBootParameter{.processor_resource = resource, .notify = 0};
-        const auto stack_ptr = std::bit_cast<uint64_t>(resource->stack->get_frame()) + bytes_per_frame * n_stack_frames;
+        const auto stack_ptr      = std::bit_cast<uint64_t>(resource->stack->get_frame()) + bytes_per_frame * n_stack_frames;
         smp::start_ap(trampoline_page, lapic_id, &ap_main, stack_ptr, &boot_parameter);
         processor_resources.emplace_back(std::move(resource));
 
@@ -378,13 +378,10 @@ class Kernel {
         {
             struct Main {
                 static auto main(uint64_t id, int64_t data) -> void {
-                    auto count = size_t(0);
-                    while(1) {
-                        if(count % 10000000 == 0) {
-                            debug::println("hello, this is ", data, "@", smp::get_processor_number());
-                        }
-                        count += 1;
-                    }
+                loop:
+                    printk("hello from processor %d\n", smp::get_processor_number());
+                    process::manager->suspend_this_thread_for_ms(1000);
+                    goto loop;
                 }
             };
             const auto pid = process::manager->create_process();
@@ -395,7 +392,7 @@ class Kernel {
                     break;
                 }
                 const auto tid = tid_r.as_value();
-                fatal_assert(!process::manager->wakeup_thread(pid, tid), "failed to wakeup thread");
+                fatal_assert(!process::manager->wakeup_thread(pid, tid, +2), "failed to wakeup thread");
             }
         }
 

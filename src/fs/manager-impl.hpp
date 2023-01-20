@@ -1,3 +1,4 @@
+#pragma once
 #include "../fs/drivers/fat/create.hpp"
 
 namespace fs {

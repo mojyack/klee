@@ -1,11 +1,12 @@
 #pragma once
 #include <span>
 
+#include "../interrupt/vector.hpp"
 #include "../log.hpp"
 #include "../message.hpp"
-#include "../util/spinlock.hpp"
 #include "../smp/ipi.hpp"
-#include "../interrupt/vector.hpp"
+#include "../timer.hpp"
+#include "../util/spinlock.hpp"
 #include "process.hpp"
 
 namespace process {
@@ -30,83 +31,74 @@ constexpr static auto is_valid_nice(const Nice nice) -> bool {
     return nice >= -max_nice && nice <= max_nice;
 }
 
-struct ProcessorLocal {
+template <class T, class U>
+auto erase_all(T& c, const U& value) -> void {
+    const auto it = std::remove(c.begin(), c.end(), value);
+    c.erase(it, c.end());
+}
+
+class ProcessorLocal {
+  private:
+    static auto should_skip(const Thread* const thread, const size_t tick) -> bool {
+        if(thread->suspend_from == 0) {
+            return false;
+        }
+
+        const auto elapsed = tick - thread->suspend_from;
+        return elapsed < thread->suspend_for;
+    }
+
+  public:
     Thread*                                           this_thread;
     std::array<std::deque<Thread*>, max_nice * 2 + 1> run_queue;
-    Nice                                              current_nice       = 0;
-    uint8_t lapic_id;
-    bool                                              reset_current_nice = false;
+    uint8_t                                           lapic_id;
 
-    auto update_this_thread() -> void {
+    auto update_this_thread(const size_t tick) -> void {
         {
-            auto& nice_queue = run_queue[nice_to_index(current_nice)];
-            nice_queue.pop_front();
+            auto& nice_queue = run_queue[nice_to_index(this_thread->nice)];
+            erase_all(nice_queue, this_thread);
             if(this_thread->running_on != smp::invalid_processor_number) {
                 nice_queue.push_back(this_thread);
             }
-            if(nice_queue.empty()) {
-                reset_current_nice = true;
-            }
         }
-        if(reset_current_nice) {
-            reset_current_nice = false;
-            for(auto i = 0; i < 2 * max_nice + 1; i += 1) {
-                if(run_queue[i].empty()) {
-                    continue;
+        for(auto nice = -max_nice; nice <= max_nice; nice += 1) {
+            for(const auto thread : run_queue[nice_to_index(nice)]) {
+                if(!should_skip(thread, tick)) {
+                    thread->suspend_from = 0;
+                    this_thread          = thread;
+                    return;
                 }
-                current_nice = index_to_nice(i);
-                break;
             }
         }
-        this_thread = run_queue[nice_to_index(current_nice)].front();
+        fatal_error("kernel: run queue empty");
     }
 
-    auto change_nice_of_running_thread(Thread* const thread, const Nice nice) -> Error {
-        if(nice == invalid_nice || thread->nice == nice) {
-            return Success();
-        }
+    auto move_between_run_queue(Thread* const thread, const Nice nice) -> Error {
         if(!is_valid_nice(nice)) {
             return Error::Code::InvalidNice;
         }
-
-        auto& nice_queue = run_queue[nice_to_index(nice)];
-        erase(run_queue[nice_to_index(thread->nice)], thread);
-        nice_queue.push_back(thread);
-        thread->nice = nice;
-
-        if(thread == nice_queue.front()) {
-            current_nice = nice;
-            if(nice > current_nice) {
-                reset_current_nice = true;
-            }
-        } else {
-            if(nice < current_nice) {
-                reset_current_nice = true;
-            }
+        if(thread->nice == nice) {
+            return Success();
         }
+
+        erase_from_run_queue(thread);
+        thread->nice = nice;
+        push_to_run_queue(thread);
+
         return Success();
     }
 
-    auto push_to_run_queue(Thread* const thread, const Nice nice) -> void {
-        run_queue[nice_to_index(nice)].push_back(thread);
-        if(nice < current_nice) {
-            reset_current_nice = true;
-        }
+    auto push_to_run_queue(Thread* const thread) -> void {
+        run_queue[nice_to_index(thread->nice)].push_back(thread);
     }
 
     auto erase_from_run_queue(Thread* const thread) -> void {
-        erase(run_queue[nice_to_index(current_nice)], thread);
+        erase_all(run_queue[nice_to_index(thread->nice)], thread);
     }
 };
 
 class Manager {
   private:
-    template <class T, class U>
-    static auto erase(T& c, const U& value) -> void {
-        const auto it = std::remove(c.begin(), c.end(), value);
-        c.erase(it, c.end());
-    }
-
     uint64_t tick = 0;
 
     spinlock::SpinLock          mutex;
@@ -133,7 +125,7 @@ class Manager {
         auto& local = locals[smp::get_processor_number()];
 
         const auto current_thread = local.this_thread;
-        local.update_this_thread();
+        local.update_this_thread(tick);
         const auto next_thread = local.this_thread;
 
         if(current_thread == next_thread) {
@@ -155,7 +147,7 @@ class Manager {
         auto& local = locals[smp::get_processor_number()];
 
         const auto current_thread = local.this_thread;
-        local.update_this_thread();
+        local.update_this_thread(tick);
         const auto next_thread = local.this_thread;
 
         if(current_thread == next_thread) {
@@ -232,11 +224,15 @@ class Manager {
         return Success();
     }
 
-    auto wakeup_thread(const AutoLock& lock, Thread* const thread, Nice nice = invalid_nice) -> Error {
+    auto wakeup_thread(const AutoLock& lock, Thread* const thread, const Nice nice = invalid_nice) -> Error {
         auto& local = locals[smp::get_processor_number()];
 
         if(thread->running_on != smp::invalid_processor_number) {
-            return local.change_nice_of_running_thread(thread, nice);
+            if(nice == invalid_nice) {
+                return Success();
+            } else {
+                return local.move_between_run_queue(thread, nice);
+            }
         }
 
         if(nice != invalid_nice) {
@@ -244,11 +240,9 @@ class Manager {
                 return Error::Code::InvalidNice;
             }
             thread->nice = nice;
-        } else {
-            nice = thread->nice;
         }
         thread->running_on = smp::get_processor_number();
-        local.push_to_run_queue(thread, nice);
+        local.push_to_run_queue(thread);
         return Success();
     }
 
@@ -257,15 +251,25 @@ class Manager {
             return;
         }
 
-        // logger(LogLevel::Debug, "manager: sleeping thread(%lu.%lu)", thread->process->id, thread->id);
-
-        if(thread->running_on == smp::get_processor_number()) {
+        if(thread == locals[smp::get_processor_number()].this_thread) {
             thread->running_on = smp::invalid_processor_number;
             switch_thread(std::move(lock));
         } else {
             auto& local        = locals[thread->running_on];
             thread->running_on = smp::invalid_processor_number;
             local.erase_from_run_queue(thread);
+        }
+    }
+
+    auto suspend_thread_for_tick(AutoLock lock, Thread* const thread, const size_t wait_tick) -> void {
+        if(wait_tick == 0) {
+            return;
+        }
+
+        thread->suspend_from = tick == 0 ? 1 : tick;
+        thread->suspend_for  = tick == 0 ? wait_tick - 1 : wait_tick;
+        if(thread == locals[smp::get_processor_number()].this_thread) {
+            switch_thread(std::move(lock));
         }
     }
 
@@ -291,13 +295,13 @@ class Manager {
     }
 
     auto unwait_event(const AutoLock& /*lock*/, const EventID event_id) -> Error {
-        auto&      local  = locals[smp::get_processor_number()];
-        const auto thread = local.this_thread;
+        auto& local = locals[smp::get_processor_number()];
         if(!events.contains(event_id)) {
             return Error::Code::NoSuchEvent;
         } else {
-            erase(*events[event_id], thread);
-            erase(thread->events, event_id);
+            const auto thread = local.this_thread;
+            erase_all(*events[event_id], thread);
+            erase_all(thread->events, event_id);
         }
 
         return Success();
@@ -306,7 +310,7 @@ class Manager {
     auto cancel_events_of_thread(const AutoLock& /*lock*/, const AutoLock& /*events_lock*/, Thread* const thread) -> void {
         for(const auto event_id : thread->events) {
             fatal_assert(events.contains(event_id), "process::manager: unknown event_id found in thread");
-            erase(*events[event_id], thread);
+            erase_all(*events[event_id], thread);
         }
     }
 
@@ -412,6 +416,23 @@ class Manager {
         auto& local = locals[smp::get_processor_number()];
 
         sleep_thread(std::move(lock), local.this_thread);
+    }
+
+    auto suspend_thread_for_ms(const ProcessID pid, const ThreadID tid, const size_t ms) -> Error {
+        auto lock = AutoLock(mutex);
+
+        const auto find_thread_result = find_alive_thread(lock, pid, tid);
+        if(!find_thread_result) {
+            return find_thread_result.as_error();
+        }
+        const auto thread = find_thread_result.as_value();
+
+        suspend_thread_for_tick(std::move(lock), thread, ms * timer::frequency / 1000);
+        return Success();
+    }
+
+    auto suspend_this_thread_for_ms(const size_t ms) -> void {
+        suspend_thread_for_tick(AutoLock(mutex), locals[smp::get_processor_number()].this_thread, ms * timer::frequency / 1000);
     }
 
     auto exit_thread(const ProcessID pid, const ThreadID tid) -> Error {
@@ -547,7 +568,7 @@ class Manager {
         }
 
         for(const auto t : to_wakeup) {
-            erase(t->events, event_id);
+            erase_all(t->events, event_id);
             if(const auto e = wakeup_thread(lock, t)) {
                 return e;
             }
@@ -566,7 +587,7 @@ class Manager {
     }
 
     auto capture_context() -> void {
-        auto& local = locals[smp::get_processor_number()];
+        auto& local    = locals[smp::get_processor_number()];
         local.lapic_id = lapic::read_lapic_id();
 
         // capture this context
@@ -604,7 +625,6 @@ class Manager {
 
     // for interrupt handlers
     auto migrate_threads(const AutoLock& /*lock*/) -> void {
-        printk("migrate start\n");
         auto local_thread_num = std::vector<size_t>(locals.size());
         auto total_threads    = size_t(0);
 
@@ -613,23 +633,18 @@ class Manager {
             for(auto& q : local.run_queue) {
                 local_thread_num[i] += q.size();
             }
-            printk("threads@%d = %lu\n", i, local_thread_num[i]);
             total_threads += local_thread_num[i];
         }
-        const auto average = (total_threads + locals.size() - 1) / locals.size();
-        printk("average = %d\n", average);
-    // 3 3 1 1 =  8 = 2
-    // 2 2 2 2
-    //
-    // 4 4 2 1 = 11 = 3
-    // 3 3 3 2
+        const auto average = total_threads / locals.size();
+        const auto mod     = total_threads - average * locals.size();
+        auto       thread  = (Thread*)(nullptr);
     loop:
-        auto thread = (Thread*)(nullptr);
-        auto exit   = true;
+        auto exit = true;
         for(auto i = size_t(0); i < locals.size(); i += 1) {
-            auto& local = locals[i];
+            const auto threshold = i < mod ? average + 1 : average;
+            auto&      local     = locals[i];
             if(thread == nullptr) {
-                if(local_thread_num[i] <= average) {
+                if(local_thread_num[i] < threshold) {
                     continue;
                 }
                 for(auto q = local.run_queue.rbegin(); q != local.run_queue.rend(); q += 1) {
@@ -641,7 +656,6 @@ class Manager {
                         local.erase_from_run_queue(t);
                         local_thread_num[i] -= 1;
                         exit = false;
-                        printk("thread@%lu pickup %lu.%lu\n", i, thread->process->id, thread->id);
                         break;
                     }
                     if(thread != nullptr) {
@@ -649,27 +663,17 @@ class Manager {
                     }
                 }
             } else {
-                if(local_thread_num[i] >= average) {
+                if(local_thread_num[i] >= threshold) {
                     continue;
                 }
-                printk("thread@%lu migrated %lu.%lu\n", i, thread->process->id, thread->id);
                 thread->running_on = i;
-                local.push_to_run_queue(thread, thread->nice);
+                local.push_to_run_queue(thread);
                 thread = nullptr;
                 local_thread_num[i] += 1;
             }
         }
         if(!exit) {
             goto loop;
-        }
-
-        for(auto i = size_t(0); i < locals.size(); i += 1) {
-            auto& local = locals[i];
-            auto c = 0;
-            for(auto& q : local.run_queue) {
-                c += q.size();
-            }
-            printk("threads@%d = %lu\n", i, c);
         }
     }
     auto switch_thread_may_fail(ThreadContext& current_context) -> void {

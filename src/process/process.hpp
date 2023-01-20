@@ -49,13 +49,15 @@ struct Thread {
 
     ThreadEntry*               entry = nullptr;
     std::vector<StackUnitType> stack;
-    ThreadContext context;
+    ThreadContext              context;
 
     smp::ProcessorNumber running_on = smp::invalid_processor_number;
     std::vector<EventID> events;
-    Nice                 nice   = 0;
-    bool                 zombie = false;
-    bool                 movable = true;
+    Nice                 nice          = 0;
+    size_t               suspend_from  = 0;
+    size_t               suspend_for   = 0;
+    bool                 zombie        = false;
+    bool                 movable       = true;
 
     // 0000RESERVED0000 00PML4000 00PDPT000 000PD0000 000PT0000 000OFFSET000
     // 0000000000000000 000000000 000000000 000000000 000000000 000000000000   // implementation limit of klee
