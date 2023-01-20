@@ -6,11 +6,12 @@
 #include "../message.hpp"
 #include "../paging.hpp"
 #include "../segment.hpp"
+#include "../smp/id.hpp"
 #include "../util/container-of.hpp"
 #include "../util/dense-map.hpp"
 
 namespace process {
-struct ThreadContext {
+struct alignas(16) ThreadContext {
     uint64_t                 cr3, rip, rflags, reserved1;            // offset 0x00
     uint64_t                 cs, ss, fs, gs;                         // offset 0x20
     uint64_t                 rax, rbx, rcx, rdx, rdi, rsi, rsp, rbp; // offset 0x40
@@ -48,12 +49,13 @@ struct Thread {
 
     ThreadEntry*               entry = nullptr;
     std::vector<StackUnitType> stack;
-    alignas(16) ThreadContext context;
+    ThreadContext context;
 
-    Nice                 nice    = 0;
-    bool                 running = false;
-    bool                 zombie  = false;
+    smp::ProcessorNumber running_on = smp::invalid_processor_number;
     std::vector<EventID> events;
+    Nice                 nice   = 0;
+    bool                 zombie = false;
+    bool                 movable = true;
 
     // 0000RESERVED0000 00PML4000 00PDPT000 000PD0000 000PT0000 000OFFSET000
     // 0000000000000000 000000000 000000000 000000000 000000000 000000000000   // implementation limit of klee
@@ -95,7 +97,7 @@ struct Process {
     IDMap<ThreadID, Thread> threads;
 
     auto apply_page_map(const AutoLock& /*lock*/, paging::PML4Table& pml4_table) -> void {
-        auto& pml4e = pml4_table[0b100000000];
+        auto& pml4e = pml4_table.data[0b100000000];
         if(page_map) {
             pml4e.data              = reinterpret_cast<uint64_t>(page_map->upper_page_map.data.data());
             pml4e.directory.present = 1;

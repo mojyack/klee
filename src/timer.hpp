@@ -3,9 +3,9 @@
 #include <queue>
 
 #include "acpi.hpp"
+#include "freq.hpp"
 #include "interrupt/vector.hpp"
 #include "lapic.hpp"
-#include "message.hpp"
 
 namespace timer {
 namespace internal {
@@ -31,10 +31,8 @@ inline auto initialize_timer() -> void {
 
     auto& lapic_registers = lapic::get_lapic_registers();
 
-    constexpr auto timer_freq = 100; // Hz
-
     lapic_registers.divide_configuration = 0b1011;                                        // divide 1:1
     lapic_registers.lvt_timer            = (0b010 << 16) | interrupt::Vector::LAPICTimer; // not-masked, periodic
-    lapic_registers.initial_count        = lapic_timer_freq / timer_freq;
+    lapic_registers.initial_count        = lapic_timer_freq / frequency;
 }
 } // namespace timer

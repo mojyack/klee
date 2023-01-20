@@ -12,8 +12,6 @@
 
 namespace interrupt {
 namespace internal {
-inline auto idt = std::array<InterruptDescriptor, 256>();
-
 constexpr auto make_idt_attr(const DescriptorType type, const uint8_t descriptor_privilege_level, const bool present = true, const uint8_t interrupt_stack_table = 0) -> InterruptDescriptorAttribute {
     auto attr                            = InterruptDescriptorAttribute();
     attr.bits.interrupt_stack_table      = interrupt_stack_table;
@@ -23,8 +21,8 @@ constexpr auto make_idt_attr(const DescriptorType type, const uint8_t descriptor
     return attr;
 }
 
-inline auto set_idt_entry(Vector index, const InterruptDescriptorAttribute attr, const uint64_t offset, const uint16_t segment_selector) -> void {
-    auto& desc = idt[index];
+inline auto set_idt_entry(InterruptDescriptorTable& idt, Vector index, const InterruptDescriptorAttribute attr, const uint64_t offset, const uint16_t segment_selector) -> void {
+    auto& desc = idt.data[index];
 
     desc.attr             = attr;
     desc.offset_low       = offset & 0xFFFFu;
@@ -34,8 +32,7 @@ inline auto set_idt_entry(Vector index, const InterruptDescriptorAttribute attr,
 }
 
 __attribute__((no_caller_saved_registers)) inline auto notify_end_of_interrupt() -> void {
-    volatile auto end_of_interrupt = reinterpret_cast<uint32_t*>(0xFEE000B0);
-    *end_of_interrupt              = 0;
+    lapic::get_lapic_registers().end_of_interrupt = 0;
 }
 
 __attribute__((interrupt)) static auto int_handler_xhci(InterruptFrame* const frame) -> void {
@@ -60,11 +57,11 @@ __attribute__((interrupt)) static auto int_handler_virtio_gpu_cursor(InterruptFr
 
 } // namespace internal
 
-inline auto initialize() -> void {
+inline auto initialize(InterruptDescriptorTable& idt) -> void {
     const auto cs = read_cs();
 
 #define sie_ist(num, addr, ist) \
-    internal::set_idt_entry(static_cast<interrupt::Vector>(num), internal::make_idt_attr(DescriptorType::InterruptGate, 0, true, ist), reinterpret_cast<uint64_t>(addr), cs);
+    internal::set_idt_entry(idt, static_cast<interrupt::Vector>(num), internal::make_idt_attr(DescriptorType::InterruptGate, 0, true, ist), reinterpret_cast<uint64_t>(addr), cs);
 
 #define sie(num, addr) \
     sie_ist(num, addr, 0)
@@ -92,11 +89,11 @@ inline auto initialize() -> void {
     sie(21, int_handler_control_protection);
 
     sie(Vector::XHCI, internal::int_handler_xhci);
-    sie(Vector::AHCI, internal::int_handler_ahci);
     sie_ist(Vector::LAPICTimer, int_handler_lapic_timer_entry, ist_for_lapic_timer);
+    sie(Vector::AHCI, internal::int_handler_ahci);
     sie(Vector::VirtIOGPUControl, internal::int_handler_virtio_gpu_control);
     sie(Vector::VirtIOGPUCursor, internal::int_handler_virtio_gpu_cursor);
-    load_idt(sizeof(internal::idt) - 1, reinterpret_cast<uintptr_t>(internal::idt.data()));
+    load_idt(sizeof(idt.data) - 1, reinterpret_cast<uintptr_t>(idt.data.data()));
 
 #undef sie
 #undef sie_ist

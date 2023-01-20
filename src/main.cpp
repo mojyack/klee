@@ -18,20 +18,16 @@
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
-#include "processor-resource.hpp"
-
-alignas(0x1000) static auto pml4_table = paging::PML4Table();
 
 class Kernel {
   private:
-    segment::GDT         gdt;
-    segment::TSSResource tss_resource;
+    smp::ProcessorResource processor_resource;
+    segment::TSSResource   tss_resource;
+    BitmapMemoryManager    memory_manager;
+    FramebufferConfig      framebuffer_config;
+    acpi::RSDP&            rsdp;
 
-    BitmapMemoryManager memory_manager;
-    FramebufferConfig   framebuffer_config;
-    acpi::RSDP&         rsdp;
-
-    std::vector<std::unique_ptr<ProcessorResource>> processor_resources;
+    std::vector<std::unique_ptr<smp::ProcessorResource>> processor_resources; // for aps
 
     static auto switch_ehci_to_xhci(const std::vector<pci::Device>& devices, const pci::Device& xhc_dev) -> void {
         auto intel_ehc_exist = false;
@@ -130,27 +126,37 @@ class Kernel {
     }
 
     static auto ap_main(smp::APBootParameter* const parameter) -> void {
-        parameter->notify = 1;
-        apply_segments(*parameter->gdt);
-        apply_pml4_table(*parameter->pml4_table);
+        auto& processor_resource = *parameter->processor_resource;
+        parameter->notify        = 1;
+        apply_segments(processor_resource.gdt);
+        apply_pml4_table(processor_resource.pml4_table);
 
         auto tss_resource = segment::TSSResource();
-        if(auto r = segment::setup_tss(*parameter->gdt); !r) {
-            while(1) __asm__("hlt");
+        if(auto r = segment::setup_tss(processor_resource.gdt); !r) {
+            fatal_error("kernel: failed to setup tss: ", r.as_error().as_int());
         } else {
             tss_resource = std::move(r.as_value());
         }
-        interrupt::initialize();
-        syscall::initialize_syscall();
 
-        logger(LogLevel::Info, "kernel: processor %u ready\n", smp::get_processor_number());
-        while(1) __asm__("hlt");
+        // enable lapic
+        auto& lapic = lapic::get_lapic_registers();
+        lapic.spurious_interrupt_vector |= 0b1'0000'0000; // software enable
+
+        interrupt::initialize(processor_resource.idt);
+        syscall::initialize_syscall();
+        process::manager->capture_context();
+
+        const auto this_thread = process::manager->get_this_thread();
+        logger(LogLevel::Info, "kernel: processor %u ready, pid=%d tid=%d\n", smp::get_processor_number(), this_thread->process->id, this_thread->id);
+        while(1) {
+            process::manager->sleep_this_thread();
+        }
     }
 
     auto boot_ap(const FrameID trampoline_page, const uint8_t lapic_id) -> Error {
         constexpr auto n_stack_frames = 1;
 
-        auto resource = processor_resources.emplace_back(new(std::nothrow) ProcessorResource).get();
+        auto resource = processor_resources.emplace_back(new(std::nothrow) smp::ProcessorResource).get();
         if(!resource) {
             return Error::Code::NoEnoughMemory;
         }
@@ -163,7 +169,7 @@ class Kernel {
         segment::create_segments(resource->gdt);
         paging::create_identity_page_table(resource->pml4_table);
 
-        const auto boot_parameter = smp::APBootParameter{&resource->gdt, &resource->pml4_table, 0};
+        const auto boot_parameter = smp::APBootParameter{.processor_resource = resource, .notify = 0};
         const auto stack_ptr = std::bit_cast<uint64_t>(resource->stack->get_frame()) + bytes_per_frame * n_stack_frames;
         smp::start_ap(trampoline_page, lapic_id, &ap_main, stack_ptr, &boot_parameter);
         processor_resources.emplace_back(std::move(resource));
@@ -176,10 +182,12 @@ class Kernel {
 
     auto boot_aps(const FrameID trampoline_page) -> Error {
         const auto bsp_id = lapic::read_lapic_id();
-        const auto ids             = acpi::detect_cores().lapic_ids;
+        const auto ids    = acpi::detect_cores().lapic_ids;
 
         // create lapic_id to processor number table
-        smp::lapic_id_to_index_table = new(std::nothrow) size_t[*std::max_element(ids.begin(), ids.end())];
+        smp::first_lapic_id          = ids.front();
+        smp::last_lapic_id           = ids.back();
+        smp::lapic_id_to_index_table = new(std::nothrow) size_t[*std::max_element(ids.begin(), ids.end()) + 1];
         fatal_assert(smp::lapic_id_to_index_table != nullptr, "no enough memory");
 
         smp::lapic_id_to_index_table[bsp_id] = 0;
@@ -192,6 +200,9 @@ class Kernel {
 
             logger(LogLevel::Info, "kernel: cpu core %d detected: lapic_id = %u\n", i, ids[i]);
         }
+
+        // prepare process manager
+        process::manager->expand_locals(ids.size());
 
         // boot aps
         for(const auto id : ids) {
@@ -208,10 +219,10 @@ class Kernel {
   public:
     auto run() -> void {
         // setup memory manager
-        segment::create_segments(gdt);
-        segment::apply_segments(gdt);
-        paging::create_identity_page_table(pml4_table);
-        paging::apply_pml4_table(pml4_table);
+        segment::create_segments(processor_resource.gdt);
+        segment::apply_segments(processor_resource.gdt);
+        paging::create_identity_page_table(processor_resource.pml4_table);
+        paging::apply_pml4_table(processor_resource.pml4_table);
         // - allocate lowest page for ap startup
         auto kernel_heap        = SmartFrameID();
         auto ap_trampoline_page = SmartFrameID();
@@ -238,7 +249,7 @@ class Kernel {
 
         // create task manager
         // mutex needs this
-        auto pm          = process::Manager(pml4_table);
+        auto pm          = process::Manager(processor_resource.pml4_table);
         process::manager = &pm;
 
         // create filesystem mananger
@@ -262,7 +273,7 @@ class Kernel {
         }
 
         // initialize tss
-        if(auto r = segment::setup_tss(gdt); !r) {
+        if(auto r = segment::setup_tss(processor_resource.gdt); !r) {
             fatal_error("failed to setup tss: ", r.as_error().as_int());
         } else {
             tss_resource = std::move(r.as_value());
@@ -274,14 +285,8 @@ class Kernel {
             return;
         }
 
-        // initialize syscall
-        syscall::initialize_syscall();
-
-        // start timer
-        timer::initialize_timer();
-
         // initialize idt
-        interrupt::initialize();
+        interrupt::initialize(processor_resource.idt);
 
         // setup devices
         auto usb_keyboard = std::unique_ptr<devfs::USBKeyboard>();
@@ -302,8 +307,6 @@ class Kernel {
         } else {
             logger(LogLevel::Warn, "kernel: no xhc device found\n");
         }
-
-        printk("pml4 at %x\n", pml4_table.data());
 
         // --- connect usb devices
         if(usb_keyboard) {
@@ -353,6 +356,12 @@ class Kernel {
         }
         ap_trampoline_page.free();
 
+        // initialize syscall
+        syscall::initialize_syscall();
+
+        // start timer
+        timer::initialize_timer();
+
         // create terminal
         auto terminal_fb_dev = "/dev/fb-uefi0";
         {
@@ -364,6 +373,31 @@ class Kernel {
         }
 
         logger(LogLevel::Info, "kernel: initialize done\n");
+
+        // thread test
+        {
+            struct Main {
+                static auto main(uint64_t id, int64_t data) -> void {
+                    auto count = size_t(0);
+                    while(1) {
+                        if(count % 10000000 == 0) {
+                            debug::println("hello, this is ", data, "@", smp::get_processor_number());
+                        }
+                        count += 1;
+                    }
+                }
+            };
+            const auto pid = process::manager->create_process();
+            for(auto i = 0; i < 10; i += 1) {
+                const auto tid_r = process::manager->create_thread(pid, Main::main, i);
+                if(!tid_r) {
+                    printk("failed to fork process\n");
+                    break;
+                }
+                const auto tid = tid_r.as_value();
+                fatal_assert(!process::manager->wakeup_thread(pid, tid), "failed to wakeup thread");
+            }
+        }
 
     loop:
         const auto& messages = kernel_message_queue.swap();
@@ -417,7 +451,7 @@ class Kernel {
 
 alignas(16) uint8_t kernel_main_stack[1024 * 1024];
 
-auto kernel_instance_buffer = std::array<uint8_t, sizeof(Kernel)>(); // max 4096 * 0x700 (Qemu)
+alignas(Kernel) auto kernel_instance_buffer = std::array<std::byte, sizeof(Kernel)>(); // max 4096 * 0x700 (Qemu)
 static_assert(sizeof(Kernel) <= 4096 * 0x700, "the kernel size overs buffer size");
 
 extern "C" void kernel_main(const MemoryMap& memory_map_ref, const FramebufferConfig& framebuffer_config_ref, acpi::RSDP& rsdp) {

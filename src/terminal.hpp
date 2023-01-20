@@ -240,12 +240,12 @@ class EventsWaiter {
     }
 };
 
-#define handle_or(path)                                             \
+#define handle_or(path, mode)                                       \
     auto handle_result = Result<fs::Handle>();                      \
     {                                                               \
         auto [lock, manager] = fs::manager->access();               \
         auto& root           = manager.get_fs_root();               \
-        handle_result        = root.open(path, fs::OpenMode::Read); \
+        handle_result        = root.open(path, mode);               \
     }                                                               \
     if(!handle_result) {                                            \
         print("open error: %d", handle_result.as_error().as_int()); \
@@ -377,7 +377,7 @@ class Shell {
             if(argv.size() == 2) {
                 path = argv[1];
             }
-            handle_or(path);
+            handle_or(path, fs::OpenMode::Read);
             for(auto i = 0;; i += 1) {
                 const auto r = handle.readdir(i);
                 if(!r) {
@@ -392,12 +392,24 @@ class Shell {
                 putc('\n');
             }
             close_handle(std::move(handle));
+        } else if(argv[0] == "mkdir") {
+            if(argv.size() != 3) {
+                puts("usage: mkdir DIR NAME");
+                return true;
+            }
+
+            handle_or(argv[1], fs::OpenMode::Write);
+            if(const auto e = handle.create(argv[2], fs::FileType::Directory)) {
+                print("create error: %d\n", e.as_int());
+            }
+            close_handle(std::move(handle));
+            return true;
         } else if(argv[0] == "cat") {
             if(argv.size() != 2) {
                 puts("usage: cat FILE");
                 return true;
             }
-            handle_or(argv[1]);
+            handle_or(argv[1], fs::OpenMode::Read);
             auto           size   = handle.get_filesize();
             auto           offset = 0;
             constexpr auto chunk  = size_t(64);
@@ -428,7 +440,7 @@ class Shell {
                 puts("usage: run FILE");
                 return true;
             }
-            handle_or(argv[1]);
+            handle_or(argv[1], fs::OpenMode::Read);
             const auto num_frames         = (handle.get_filesize() + bytes_per_frame - 1) / bytes_per_frame;
             auto       code_frames_result = allocator->allocate(num_frames);
             if(!code_frames_result) {

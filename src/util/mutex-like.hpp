@@ -24,6 +24,10 @@ class AutoMutex {
         }
     }
 
+    auto forget() -> void {
+        mutex = nullptr;
+    }
+
     auto get_raw_mutex() -> Mutex* {
         return mutex;
     }

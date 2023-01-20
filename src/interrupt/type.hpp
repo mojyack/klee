@@ -1,5 +1,5 @@
 #pragma once
-#include <cstdint>
+#include <array>
 
 #include "../x86-descriptor.hpp"
 
@@ -32,6 +32,10 @@ struct InterruptFrame {
     uint64_t rflags;
     uint64_t rsp;
     uint64_t ss;
+};
+
+struct InterruptDescriptorTable {
+    std::array<InterruptDescriptor, 256> data;
 };
 
 constexpr auto ist_for_lapic_timer = 1;

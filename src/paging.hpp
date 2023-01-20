@@ -172,7 +172,9 @@ enum Attribute : int {
 };
 
 // must be page aligned (alignas(4096))
-using PML4Table = std::array<PML4Entry, 512>;
+struct alignas(0x1000) PML4Table {
+    std::array<PML4Entry, 512> data;
+};
 
 inline auto create_identity_page_table(PML4Table& pml4_table) -> void {
     constexpr auto page_size_4k = size_t(4096);
@@ -183,9 +185,9 @@ inline auto create_identity_page_table(PML4Table& pml4_table) -> void {
     alignas(4096) static auto page_directory_resource = std::array<PageDirectory, 64>();
     alignas(4096) static auto pdp_table               = std::array<PDPTEntry, 512>();
 
-    pml4_table[0].data              = reinterpret_cast<uint64_t>(pdp_table.data());
-    pml4_table[0].directory.present = 1;
-    pml4_table[0].directory.write   = 1;
+    pml4_table.data[0].data              = reinterpret_cast<uint64_t>(pdp_table.data());
+    pml4_table.data[0].directory.present = 1;
+    pml4_table.data[0].directory.write   = 1;
 
     for(auto i_pdpt = 0; i_pdpt < page_directory_resource.size(); i_pdpt += 1) {
         auto& pd   = page_directory_resource[i_pdpt];
@@ -207,7 +209,7 @@ inline auto create_identity_page_table(PML4Table& pml4_table) -> void {
 }
 
 inline auto apply_pml4_table(PML4Table& pml4_table) {
-    set_cr3(reinterpret_cast<uint64_t>(pml4_table.data()));
+    set_cr3(reinterpret_cast<uint64_t>(pml4_table.data.data()));
 }
 
 inline auto split_addr_for_page_table(uintptr_t addr) -> std::array<uint16_t, 4> {

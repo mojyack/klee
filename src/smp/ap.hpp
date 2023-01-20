@@ -3,14 +3,12 @@
 #include "../lapic.hpp"
 #include "../log.hpp"
 #include "../memory-manager.hpp"
-#include "../paging.hpp"
-#include "../segment.hpp"
 #include "ipi.hpp"
+#include "processor-resource.hpp"
 
 namespace smp {
 struct APBootParameter {
-    segment::GDT*      gdt;
-    paging::PML4Table* pml4_table;
+    ProcessorResource* processor_resource;
     uint64_t           notify;
 };
 
@@ -36,7 +34,7 @@ inline auto install_trampoline(std::byte* const work, APEntry kernel_entry, cons
     const auto var_boot_parameter_addr = std::bit_cast<const APBootParameter**>(work + var_boot_parameter_offset);
 
     memcpy(work, &trampoline, trampoline_size);
-    *var_cr3_addr            = static_cast<uint32_t>(std::bit_cast<uintptr_t>(boot_parameter->pml4_table->data()));
+    *var_cr3_addr            = static_cast<uint32_t>(std::bit_cast<uintptr_t>(boot_parameter->processor_resource->pml4_table.data.data()));
     *var_kernel_entry_addr   = std::bit_cast<uint64_t>(kernel_entry);
     *var_kernel_stack_addr   = kernel_stack;
     *var_boot_parameter_addr = boot_parameter;
