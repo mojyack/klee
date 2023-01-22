@@ -338,7 +338,7 @@ class Kernel {
             sata_controller = ahci::initialize(*pci_devices.ahci);
         }
 
-        const auto kernel_pid           = process::manager->get_this_thread()->id;
+        const auto kernel_pid           = process::manager->get_this_thread()->process->id;
         auto       fs_device_finder_tid = process::ThreadID();
         if(sata_controller) {
             const auto tid_r = process::manager->create_thread(kernel_pid, fs::device_finder_main, reinterpret_cast<int64_t>(sata_controller.get()));
