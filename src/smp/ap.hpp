@@ -1,6 +1,6 @@
 #pragma once
 #include "../acpi.hpp"
-#include "../lapic.hpp"
+#include "../lapic/registers.hpp"
 #include "../log.hpp"
 #include "../memory-manager.hpp"
 #include "ipi.hpp"
@@ -41,7 +41,7 @@ inline auto install_trampoline(std::byte* const work, APEntry kernel_entry, cons
 }
 
 inline auto send_init_start(const uint8_t target_lapic_id, const uintptr_t start) -> void {
-    auto& lapic_registers = lapic::get_lapic_registers();
+    auto& lapic_registers = lapic::get_registers();
 
     auto command_low  = InterruptCommandLow{.data = lapic_registers.interrupt_command_0 & 0xFF'F0'00'00u};
     auto command_high = InterruptCommandHigh{.data = lapic_registers.interrupt_command_1 & 0x00'FF'FF'FFu};

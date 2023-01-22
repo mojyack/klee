@@ -3,9 +3,9 @@
 #include <cstdint>
 
 namespace lapic {
-constexpr auto lapic_base = 0xFE'E0'00'00lu;
+constexpr auto base_address = 0xFE'E0'00'00lu;
 
-struct LAPICRegisters {
+struct Registers {
     alignas(16) uint32_t reserved1_1;                           // +0x0000
     alignas(16) uint32_t reserved1_2;                           // +0x0010
     alignas(16) uint32_t lapic_id;                              // +0x0020 (rw)
@@ -72,13 +72,13 @@ struct LAPICRegisters {
     alignas(16) uint32_t reserved5_1;                           // +0x03F0
 } __attribute__((packed));
 
-static_assert(sizeof(LAPICRegisters) == 0x400);
+static_assert(sizeof(Registers) == 0x400);
 
-inline auto get_lapic_registers() -> volatile LAPICRegisters& {
-    return *(std::bit_cast<LAPICRegisters*>(lapic_base));
+inline auto get_registers() -> volatile Registers& {
+    return *(std::bit_cast<Registers*>(base_address));
 }
 
 inline auto read_lapic_id() -> uint8_t {
-    return get_lapic_registers().lapic_id >> 24;
+    return get_registers().lapic_id >> 24;
 }
 } // namespace lapic

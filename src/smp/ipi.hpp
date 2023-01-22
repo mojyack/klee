@@ -1,5 +1,5 @@
 #pragma once
-#include "../lapic.hpp"
+#include <cstdint>
 
 namespace smp {
 enum class DeliveryMode : uint64_t {

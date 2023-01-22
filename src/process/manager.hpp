@@ -1,11 +1,11 @@
 #pragma once
 #include <span>
 
+#include "../constants.hpp"
 #include "../interrupt/vector.hpp"
 #include "../log.hpp"
 #include "../message.hpp"
 #include "../smp/ipi.hpp"
-#include "../timer.hpp"
 #include "../util/spinlock.hpp"
 #include "process.hpp"
 
@@ -321,8 +321,12 @@ class Manager {
         fatal_assert(wakeup_thread(lock, event_processor) == Error::Code::Success, "failed to wakeup kernel thread");
     }
 
+    static auto ms_to_tick(const size_t ms) -> size_t {
+        return ms * constants::context_switch_frequency / 1000;
+    }
+
     static auto send_timer_ipi(const uint8_t lapic_id) -> void {
-        volatile auto& lapic_registers = lapic::get_lapic_registers();
+        volatile auto& lapic_registers = lapic::get_registers();
 
         auto command_low  = smp::InterruptCommandLow{.data = lapic_registers.interrupt_command_0 & 0xFF'F0'00'00u};
         auto command_high = smp::InterruptCommandHigh{.data = lapic_registers.interrupt_command_1 & 0x00'FF'FF'FFu};
@@ -427,12 +431,12 @@ class Manager {
         }
         const auto thread = find_thread_result.as_value();
 
-        suspend_thread_for_tick(std::move(lock), thread, ms * timer::frequency / 1000);
+        suspend_thread_for_tick(std::move(lock), thread, ms_to_tick(ms));
         return Success();
     }
 
     auto suspend_this_thread_for_ms(const size_t ms) -> void {
-        suspend_thread_for_tick(AutoLock(mutex), locals[smp::get_processor_number()].this_thread, ms * timer::frequency / 1000);
+        suspend_thread_for_tick(AutoLock(mutex), locals[smp::get_processor_number()].this_thread, ms_to_tick(ms));
     }
 
     auto exit_thread(const ProcessID pid, const ThreadID tid) -> Error {

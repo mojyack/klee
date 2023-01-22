@@ -5,6 +5,7 @@
 #include "fs/manager-impl.hpp"
 #include "interrupt/interrupt.hpp"
 #include "keyboard.hpp"
+#include "lapic/timer.hpp"
 #include "memory-map.h"
 #include "mouse.hpp"
 #include "paging.hpp"
@@ -14,7 +15,6 @@
 #include "smp/id.hpp"
 #include "syscall.hpp"
 #include "terminal.hpp"
-#include "timer.hpp"
 #include "usb/classdriver/hid.hpp"
 #include "usb/xhci/xhci.hpp"
 #include "virtio/gpu.hpp"
@@ -139,7 +139,7 @@ class Kernel {
         }
 
         // enable lapic
-        auto& lapic = lapic::get_lapic_registers();
+        auto& lapic = lapic::get_registers();
         lapic.spurious_interrupt_vector |= 0b1'0000'0000; // software enable
 
         interrupt::initialize(processor_resource.idt);
@@ -360,7 +360,7 @@ class Kernel {
         syscall::initialize_syscall();
 
         // start timer
-        timer::initialize_timer();
+        lapic::start_timer(interrupt::Vector::LAPICTimer);
 
         // create terminal
         auto terminal_fb_dev = "/dev/fb-uefi0";

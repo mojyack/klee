@@ -1,7 +1,7 @@
 #pragma once
 #include <array>
 
-#include "../lapic.hpp"
+#include "../lapic/registers.hpp"
 
 namespace smp {
 using ProcessorNumber = size_t;

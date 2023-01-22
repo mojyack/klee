@@ -5,7 +5,6 @@
 
 #include "../asmcode.h"
 #include "../message.hpp"
-#include "../timer.hpp"
 #include "../x86-descriptor.hpp"
 #include "fault_handlers.hpp"
 #include "type.hpp"
@@ -32,7 +31,7 @@ inline auto set_idt_entry(InterruptDescriptorTable& idt, Vector index, const Int
 }
 
 __attribute__((no_caller_saved_registers)) inline auto notify_end_of_interrupt() -> void {
-    lapic::get_lapic_registers().end_of_interrupt = 0;
+    lapic::get_registers().end_of_interrupt = 0;
 }
 
 __attribute__((interrupt)) static auto int_handler_xhci(InterruptFrame* const frame) -> void {
