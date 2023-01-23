@@ -144,7 +144,7 @@ class Kernel {
 
         interrupt::initialize(processor_resource.idt);
         syscall::initialize_syscall();
-        process::manager->capture_context();
+        process::manager->capture_context(processor_resource.pml4_table);
 
         const auto this_thread = process::manager->get_this_thread();
         logger(LogLevel::Info, "kernel: processor %u ready, pid=%d tid=%d\n", smp::get_processor_number(), this_thread->process->id, this_thread->id);
@@ -375,7 +375,7 @@ class Kernel {
         logger(LogLevel::Info, "kernel: initialize done\n");
 
         // thread test
-        {
+        if(0){
             struct Main {
                 static auto main(uint64_t id, int64_t data) -> void {
                 loop:
@@ -470,10 +470,16 @@ extern "C" auto int_handler_lapic_timer(process::ThreadContext& context) -> void
 }
 } // namespace interrupt::internal
 
-// syscall.hpp
+// syscall
 namespace syscall {
-extern "C" auto syscall_table = std::array<void*, 2>{
+extern "C" {
+auto syscall_table = std::array<void*, 2>{
     (void*)syscall_printk,
     (void*)syscall_exit,
 };
+
+__attribute__((no_caller_saved_registers)) auto get_stack_ptr() -> uintptr_t {
+    return process::manager->get_this_thread()->system_stack_address;
 }
+}
+} // namespace syscall

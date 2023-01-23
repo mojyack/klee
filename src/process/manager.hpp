@@ -49,6 +49,7 @@ class ProcessorLocal {
     }
 
   public:
+    paging::PML4Table*                                pml4_table;
     Thread*                                           this_thread;
     std::array<std::deque<Thread*>, max_nice * 2 + 1> run_queue;
     uint8_t                                           lapic_id;
@@ -113,8 +114,6 @@ class Manager {
     ProcessID     kernel_pid;
     Thread*       event_processor;
 
-    paging::PML4Table& pml4_table;
-
     static auto idle_main(const uint64_t id, const int64_t data) -> void {
         while(true) {
             __asm__("hlt");
@@ -137,7 +136,7 @@ class Manager {
         {
             const auto process = next_thread->process;
             const auto lock    = AutoLock(process->page_map_mutex);
-            process->apply_page_map(lock, pml4_table);
+            process->apply_page_map(lock, *local.pml4_table);
         }
         alignas(16) const auto next_context = next_thread->context;
         switch_context(&next_context, &current_thread->context, lock.get_raw_mutex()->get_native());
@@ -170,7 +169,7 @@ class Manager {
         {
             const auto process = next_thread->process;
             const auto lock    = AutoLock(process->page_map_mutex);
-            process->apply_page_map(lock, pml4_table);
+            process->apply_page_map(lock, *local.pml4_table);
         }
         restore_context(&next_thread->context);
     }
@@ -280,6 +279,9 @@ class Manager {
             cancel_events_of_thread(lock, events_lock, thread);
         }
         logger(LogLevel::Debug, "process: thread exitted(%lu.%lu)\n", thread->process->id, thread->id);
+        if(const auto e = notify_event(thread_joined_event)) {
+            logger(LogLevel::Error, "process: failed to notify thread exit: %d\n", e.as_int());
+        }
         sleep_thread(std::move(lock), thread);
     }
 
@@ -585,14 +587,20 @@ class Manager {
         return local.this_thread;
     }
 
+    auto get_pml4_table() -> paging::PML4Table& {
+        auto& local = locals[smp::get_processor_number()];
+        return *local.pml4_table;
+    }
+
     // for kernel processes
     auto expand_locals(const size_t new_size) -> void {
         locals.resize(new_size);
     }
 
-    auto capture_context() -> void {
-        auto& local    = locals[smp::get_processor_number()];
-        local.lapic_id = lapic::read_lapic_id();
+    auto capture_context(paging::PML4Table& pml4_table) -> void {
+        auto& local      = locals[smp::get_processor_number()];
+        local.pml4_table = &pml4_table;
+        local.lapic_id   = lapic::read_lapic_id();
 
         // capture this context
         {
@@ -719,13 +727,12 @@ class Manager {
     // ~for interrupt handlers
 
     Manager(paging::PML4Table& pml4_table) : thread_joined_event(create_event()),
-                                             process_joined_event(create_event()),
-                                             pml4_table(pml4_table) {
+                                             process_joined_event(create_event()) {
         locals.resize(1);
         auto& local = locals[smp::get_processor_number()];
 
         kernel_pid = create_process();
-        capture_context();
+        capture_context(pml4_table);
         event_processor = local.this_thread;
     }
 };

@@ -5,7 +5,7 @@
 
 #include "memory-manager.hpp"
 #include "paging.hpp"
-#include "process/process.hpp"
+#include "process/manager.hpp"
 
 namespace elf {
 struct ELF {
@@ -96,8 +96,7 @@ inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdp
         paging::map_virtual_to_physical(&pdpt, virtual_addr, physical_addr, paging::Attribute::UserExecute | paging::Attribute::Write);
     }
 
-    // TODO
-    // process->apply_page_map(lock);
+    process->apply_page_map(lock, process::manager->get_pml4_table());
 
     for(auto i = 0; i < elf.program_header_limit; i += 1) {
         const auto& ph = *reinterpret_cast<ProgramHeader*>(program_headers + elf.program_header_size * i);

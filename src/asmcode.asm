@@ -97,6 +97,7 @@ jump_to_app:  ; void jump_to_app(uint64_t id, int64_t data, uint16_t ss(rdx), ui
     retfq
 
 extern syscall_table
+extern get_stack_ptr
 global syscall_entry
 syscall_entry:
     push rbp
@@ -106,8 +107,21 @@ syscall_entry:
     mov rcx, r10 ; restore 4th argument (rcx is used by SYSCALL)
     mov rbp, rsp ; rebase stack
 
-    and rsp, 0xFFFFFFFFFFFFFFF0 ; rsp must be 16 byte aligned
+    ; use system stack
+    and rsp, 0xFFFFFFFFFFFFFFF0
+    push rax            ; save rax
+    push rdx            ; save rdx
+    call get_stack_ptr  ; rax = system_stack_address
+    mov rdx, [rsp + 0]  ; restore saved rdx to rdx
+    mov [rax - 16], rdx ; send rdx value to system stack
+    mov rdx, [rsp + 8]  ; restore saved rax to rdx
+    mov [rax - 8], rdx  ; send rax value to system stack
 
+    lea rsp, [rax - 16] ; set stack
+    pop rdx             ; receive copied rdx
+    pop rax             ; receive copied rax
+
+    and rsp, 0xFFFFFFFFFFFFFFF0
     call [syscall_table + 8 * eax]
 
     mov rsp, rbp 
@@ -117,15 +131,6 @@ syscall_entry:
     pop rbp
 
     o64 sysret
-
-; uint64_t exchange_stack(uint64_t new_stack)
-global exchange_stack 
-exchange_stack:
-    pop rsi ; return address
-    mov rax, rsp
-    mov rsp, rdi
-    push rsi
-    ret
 
 global load_tr
 load_tr:

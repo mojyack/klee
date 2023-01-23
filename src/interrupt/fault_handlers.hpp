@@ -43,7 +43,6 @@ __attribute__((no_caller_saved_registers)) inline auto try_kill_app(const Interr
         return;
     }
 
-    exchange_stack(process::manager->get_this_thread()->system_stack_address);
     process::manager->exit_this_thread();
 }
 

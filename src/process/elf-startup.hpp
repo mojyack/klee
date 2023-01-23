@@ -9,11 +9,11 @@ struct PrepareResult {
     uint64_t stack;
 };
 
-inline auto elf_prepare(const uint64_t data, Thread* const thread) -> std::optional<PrepareResult> {
+inline auto elf_prepare(const int64_t data, Thread* const thread) -> std::optional<PrepareResult> {
     const auto process = thread->process;
     const auto lock    = AutoLock(process->page_map_mutex);
 
-    auto image = std::unique_ptr<SmartFrameID>(reinterpret_cast<SmartFrameID*>(data));
+    auto image = std::unique_ptr<SmartFrameID>(std::bit_cast<SmartFrameID*>(data));
     process->page_map.reset(new PageMap());
 
     auto elf_info_result = elf::load_elf(*image.get(), process->page_map->upper_page_map, process, lock);
