@@ -2,6 +2,7 @@
 #include <deque>
 #include <vector>
 
+#include "../arch/amd64/control-registers.hpp"
 #include "../memory-manager.hpp"
 #include "../message.hpp"
 #include "../paging.hpp"
@@ -77,7 +78,7 @@ struct Thread {
         context.rdi = id;
         context.rsi = data;
 
-        context.cr3    = get_cr3();
+        context.cr3    = amd64::cr::CR3::load().data;
         context.rflags = 0x202;
         context.cs     = segment::kernel_cs.data;
         context.ss     = segment::kernel_ss.data;

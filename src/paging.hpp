@@ -2,7 +2,7 @@
 #include <array>
 #include <unordered_map>
 
-#include "asmcode.h"
+#include "arch/amd64/control-registers.hpp"
 
 namespace paging {
 // page-map level 4
@@ -209,7 +209,9 @@ inline auto create_identity_page_table(PML4Table& pml4_table) -> void {
 }
 
 inline auto apply_pml4_table(PML4Table& pml4_table) {
-    set_cr3(reinterpret_cast<uint64_t>(pml4_table.data.data()));
+    auto cr                    = amd64::cr::CR3::load();
+    cr.bits.pml4_table_address = std::bit_cast<uint64_t>(pml4_table.data.data());
+    cr.apply();
 }
 
 inline auto split_addr_for_page_table(uintptr_t addr) -> std::array<uint16_t, 4> {

@@ -37,4 +37,26 @@ union CR0 {
             : "r"(data));
     }
 };
+
+union CR3 {
+    uint64_t data;
+    struct {
+        uint64_t pml4_table_address : 64;
+    } __attribute__((packed)) bits;
+
+    static auto load() -> CR3 {
+        auto cr3 = CR3();
+        __asm__(
+            "mov %0, cr3;"
+            : "=r"(cr3.data));
+        return cr3;
+    }
+
+    auto apply() const -> void {
+        __asm__(
+            "mov cr3, %0;"
+            :
+            : "r"(data));
+    }
+};
 } // namespace amd64::cr
