@@ -1,5 +1,5 @@
 #pragma once
-#include "asmcode.h"
+#include "asmcode.hpp"
 #include "msr.hpp"
 #include "print.hpp"
 #include "process/manager.hpp"

@@ -1,7 +1,7 @@
 #pragma once
 #include <array>
 
-#include "asmcode.h"
+#include "asmcode.hpp"
 #include "interrupt/type.hpp"
 #include "macro.hpp"
 #include "memory-manager.hpp"
@@ -152,4 +152,3 @@ inline auto setup_tss(GDT& gdt) -> Result<TSSResource> {
     return TSSResource{std::move(tss), std::move(rsp_stack), std::move(rst_stack)};
 }
 } // namespace segment
-

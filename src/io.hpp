@@ -1,9 +1,9 @@
 #pragma once
-#include "asmcode.h"
+#include "asmcode.hpp"
 
 namespace io::internal {
-static constexpr auto config_address = 0x0CF8;
-static constexpr auto config_data    = 0x0CFC;
+constexpr auto config_address = 0x0CF8;
+constexpr auto config_data    = 0x0CFC;
 } // namespace io::internal
 
 inline auto write_address(const uint32_t address) -> void {
