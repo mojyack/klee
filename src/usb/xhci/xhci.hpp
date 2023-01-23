@@ -56,7 +56,7 @@ inline auto calc_most_significant_bit(const uint32_t value) -> int {
     }
 
     auto msb_index = int();
-    __asm__("bsr %1, %0"
+    __asm__("bsr %0, %1"
             : "=r"(msb_index)
             : "m"(value));
     return msb_index;

@@ -7,7 +7,7 @@ INCLUDES     = $(addprefix -I, \
                    $(abspath edk2/MdePkg/Include) \
                    $(abspath edk2/MdePkg/Include/X64) \
                )
-COMMON_FLAGS = -O3 -Wall -Wfatal-errors --target=$(TARGET) \
+COMMON_FLAGS = -O3 -masm=intel -Wall -Wfatal-errors --target=$(TARGET) \
                -nostdlibinc -ffreestanding -mlong-double-64 \
                -U__linux__ -D__ELF__ -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
 CXX = clang++ -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 -Wno-address-of-packed-member -march=x86-64-v2 $(INCLUDES) $(COMMON_FLAGS) -c
