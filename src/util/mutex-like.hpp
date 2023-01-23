@@ -70,6 +70,10 @@ class SharedValue {
         return data;
     }
 
+    auto assume_locked() -> T& {
+        return data;
+    }
+
     template <class... Args>
     SharedValue(Args&&... args) : data(std::move(args)...) {}
     SharedValue() {}

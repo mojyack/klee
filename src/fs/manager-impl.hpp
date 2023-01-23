@@ -19,12 +19,19 @@ inline auto FilesystemManager::mount(const std::string_view device, const std::s
         const auto filesystem = block::gpt::Filesystem::FAT32;
         switch(filesystem) {
         case block::gpt::Filesystem::FAT32: {
-            value_or(fs, fs::fat::new_driver(device));
-            fs_driver = fs.release();
+            auto driver_r = fs::fat::new_driver(device);
+            if(!driver_r) {
+                return driver_r.as_error();
+            }
+            auto& driver = driver_r.as_value();
+
+            if(const auto e = fs.mount(mountpoint, *driver)) {
+                return e;
+            }
+            fs_driver = driver.release();
         } break;
         }
         shared_driver = false;
-        error_or(fs.mount(mountpoint, *fs_driver));
     }
 
     mount_records.emplace_back(std::string(device), std::string(mountpoint), fs_driver, shared_driver);

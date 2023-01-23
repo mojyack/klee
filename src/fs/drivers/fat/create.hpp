@@ -8,13 +8,13 @@ namespace fs::fat {
 // functions below are called by fs::manager, so it should already be locked
 
 inline BlockDevice::~BlockDevice() {
-    auto& manager = fs::manager->unsafe_access(); 
-    auto& root           = manager.get_fs_root();
+    auto& manager = fs::manager->assume_locked();
+    auto& root    = manager.get_fs_root();
     root.close(std::move(handle));
 }
 
 inline auto new_driver(const std::string_view path) -> Result<std::unique_ptr<Driver>> {
-    auto& manager = fs::manager->unsafe_access(); 
+    auto& manager = fs::manager->assume_locked();
     auto& root    = manager.get_fs_root();
     value_or(handle, root.open(path, fs::OpenMode::Write));
     auto driver = std::unique_ptr<Driver>(new Driver(std::move(handle)));
