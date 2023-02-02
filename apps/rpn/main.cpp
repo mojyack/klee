@@ -8,6 +8,7 @@ auto syscall_exit(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t) ->
 
 auto start(const uint64_t task, const int64_t data) -> void {
     syscall_printk(reinterpret_cast<uint64_t>("Hello via syscall!\n"), 0, 0, 0, 0, 0);
+    syscall_exit(1, 0, 0, 0, 0, 0);
     auto fake = 0xFFFF800000000000u;
     auto buf = std::array<char, 7>{"iter 0"};
     for(auto i = 0; i < 8; i += 1) {

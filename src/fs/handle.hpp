@@ -316,10 +316,6 @@ class Controller {
         return Error::Code::NotMounted;
     }
 
-    auto _compare_root(const OpenInfo::Testdata& data) -> bool {
-        return root.test_compare(data);
-    }
-
     Controller() : root(basic_driver.get_root()) {}
 };
 } // namespace fs

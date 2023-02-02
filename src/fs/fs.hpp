@@ -120,50 +120,6 @@ class OpenInfo {
           name(name),
           type(type),
           filesize(filesize) {}
-
-    // test stuff
-    struct Testdata {
-        std::string                               name;
-        uint32_t                                  read_count  = 0;
-        uint32_t                                  write_count = 0;
-        FileType                                  type;
-        std::shared_ptr<Testdata>                 mount;
-        std::unordered_map<std::string, Testdata> children;
-    };
-
-    auto test_compare(const Testdata& data) const -> bool {
-        if(name != data.name || read_count != data.read_count || write_count != data.write_count || type != data.type) {
-            return false;
-        }
-        if(children.size() != data.children.size()) {
-            return false;
-        }
-        for(auto& [k, v] : children) {
-            if(auto p = data.children.find(k); p == data.children.end()) {
-                return false;
-            } else {
-                v.test_compare(p->second);
-            }
-        }
-        auto i1 = children.begin();
-        auto i2 = data.children.begin();
-        while(i1 != children.end()) {
-            if(!i1->second.test_compare(i2->second)) {
-                return false;
-            }
-            i1 = std::next(i1, 1);
-            i2 = std::next(i2, 1);
-        }
-
-        if(mount != nullptr) {
-            if(!data.mount) {
-                return false;
-            }
-            return mount->test_compare(*data.mount.get());
-        }
-
-        return true;
-    }
 };
 
 class Driver {
