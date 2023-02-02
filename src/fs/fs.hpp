@@ -34,7 +34,36 @@ enum class DeviceOperation {
     GetBytesPerSector,
 };
 
-class Driver;
+class OpenInfo;
+
+class Driver {
+  public:
+    virtual auto read(OpenInfo& info, size_t offset, size_t size, void* buffer) -> Result<size_t>        = 0;
+    virtual auto write(OpenInfo& info, size_t offset, size_t size, const void* buffer) -> Result<size_t> = 0;
+
+    virtual auto find(OpenInfo& info, std::string_view name) -> Result<OpenInfo>                  = 0;
+    virtual auto create(OpenInfo& info, std::string_view name, FileType type) -> Result<OpenInfo> = 0;
+    virtual auto readdir(OpenInfo& info, size_t index) -> Result<OpenInfo>                        = 0;
+    virtual auto remove(OpenInfo& info, std::string_view name) -> Error                           = 0;
+
+    virtual auto get_device_type(OpenInfo& info) -> DeviceType {
+        return DeviceType::None;
+    }
+
+    virtual auto create_device(OpenInfo& info, std::string_view name, uintptr_t device_impl) -> Result<OpenInfo>;
+
+    virtual auto control_device(OpenInfo& info, DeviceOperation op, void* arg) -> Error {
+        return Error::Code::NotImplemented;
+    }
+
+    virtual auto on_handle_create(OpenInfo& info, Event& write_event) -> void {}
+    virtual auto on_handle_update(OpenInfo& info, Event& write_event) -> void {}
+    virtual auto on_handle_destroy(OpenInfo& info) -> void {}
+
+    virtual auto get_root() -> OpenInfo& = 0;
+
+    virtual ~Driver() = default;
+};
 
 class OpenInfo {
   private:
@@ -63,20 +92,99 @@ class OpenInfo {
 
     std::unordered_map<std::string, OpenInfo> children;
 
-    auto read(size_t offset, size_t size, void* buffer) -> Result<size_t>;
-    auto write(size_t offset, size_t size, const void* buffer) -> Result<size_t>;
-    auto find(std::string_view name) -> Result<OpenInfo>;
-    auto create(std::string_view name, FileType type) -> Result<OpenInfo>;
-    auto readdir(size_t index) -> Result<OpenInfo>;
-    auto remove(std::string_view name) -> Error;
-    auto get_device_type() -> DeviceType; // can be used without opening
-    auto create_device(std::string_view name, uintptr_t device_impl) -> Result<OpenInfo>;
-    auto control_device(DeviceOperation op, void* arg) -> Error;
+    auto read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> {
+        if(!check_opened(false)) {
+            return Error::Code::FileNotOpened;
+        }
+        return driver->read(*this, offset, size, buffer);
+    }
+
+    auto write(const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> {
+        if(!check_opened(true)) {
+            return Error::Code::FileNotOpened;
+        }
+        return driver->write(*this, offset, size, buffer);
+    }
+
+    auto find(const std::string_view name) -> Result<OpenInfo> {
+        if(!check_opened(false)) {
+            return Error::Code::FileNotOpened;
+        }
+
+        auto r = driver->find(*this, name);
+        if(r) {
+            r.as_value().parent = this;
+        }
+        return r;
+    }
+
+    auto create(const std::string_view name, const FileType type) -> Result<OpenInfo> {
+        if(!check_opened(true)) {
+            return Error::Code::FileNotOpened;
+        }
+        return driver->create(*this, name, type);
+    }
+
+    auto readdir(const size_t index) -> Result<OpenInfo> {
+        if(!check_opened(false)) {
+            return Error::Code::FileNotOpened;
+        }
+
+        auto r = driver->readdir(*this, index);
+        if(r) {
+            r.as_value().parent = this;
+        }
+        return r;
+    }
+
+    auto remove(const std::string_view name) -> Error {
+        if(!check_opened(true)) {
+            return Error::Code::FileNotOpened;
+        }
+        if(children.find(std::string(name)) != children.end()) {
+            return Error::Code::FileOpened;
+        }
+        return driver->remove(*this, name);
+    }
+
+    auto get_device_type() -> DeviceType { // can be used without opening
+        if(type != FileType::Device) {
+            return DeviceType::None;
+        }
+
+        return driver->get_device_type(*this);
+    }
+
+    auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<OpenInfo> {
+        if(!check_opened(true)) {
+            return Error::Code::FileNotOpened;
+        }
+
+        return driver->create_device(*this, name, device_impl);
+    }
+
+    auto control_device(const DeviceOperation op, void* const arg) -> Error {
+        // TODO
+        // is this control requires write access?
+        if(!check_opened(false)) {
+            return Error::Code::FileNotOpened;
+        }
+
+        return driver->control_device(*this, op, arg);
+    }
 
     // used by Handle
-    auto on_handle_create(Event& write_event) -> void;
-    auto on_handle_update(Event& write_event) -> void;
-    auto on_handle_destroy() -> void;
+    auto on_handle_create(Event& write_event) -> void {
+        driver->on_handle_create(*this, write_event);
+    }
+
+    auto on_handle_update(Event& write_event) -> void {
+        driver->on_handle_update(*this, write_event);
+    }
+
+    auto on_handle_destroy() -> void {
+        driver->on_handle_destroy(*this);
+    }
 
     // used by Controller
     auto is_busy() const -> bool {
@@ -122,127 +230,7 @@ class OpenInfo {
           filesize(filesize) {}
 };
 
-class Driver {
-  public:
-    virtual auto read(OpenInfo& info, size_t offset, size_t size, void* buffer) -> Result<size_t>        = 0;
-    virtual auto write(OpenInfo& info, size_t offset, size_t size, const void* buffer) -> Result<size_t> = 0;
-
-    virtual auto find(OpenInfo& info, std::string_view name) -> Result<OpenInfo>                  = 0;
-    virtual auto create(OpenInfo& info, std::string_view name, FileType type) -> Result<OpenInfo> = 0;
-    virtual auto readdir(OpenInfo& info, size_t index) -> Result<OpenInfo>                        = 0;
-    virtual auto remove(OpenInfo& info, std::string_view name) -> Error                           = 0;
-
-    virtual auto get_device_type(OpenInfo& info) -> DeviceType {
-        return DeviceType::None;
-    }
-
-    virtual auto create_device(OpenInfo& info, std::string_view name, uintptr_t device_impl) -> Result<OpenInfo> {
-        return Error::Code::NotImplemented;
-    }
-
-    virtual auto control_device(OpenInfo& info, DeviceOperation op, void* arg) -> Error {
-        return Error::Code::NotImplemented;
-    }
-
-    virtual auto on_handle_create(OpenInfo& info, Event& write_event) -> void {}
-    virtual auto on_handle_update(OpenInfo& info, Event& write_event) -> void {}
-    virtual auto on_handle_destroy(OpenInfo& info) -> void {}
-
-    virtual auto get_root() -> OpenInfo& = 0;
-
-    virtual ~Driver() = default;
-};
-
-inline auto OpenInfo::read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> {
-    if(!check_opened(false)) {
-        return Error::Code::FileNotOpened;
-    }
-    return driver->read(*this, offset, size, buffer);
-}
-
-inline auto OpenInfo::write(const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> {
-    if(!check_opened(true)) {
-        return Error::Code::FileNotOpened;
-    }
-    return driver->write(*this, offset, size, buffer);
-}
-
-inline auto OpenInfo::find(const std::string_view name) -> Result<OpenInfo> {
-    if(!check_opened(false)) {
-        return Error::Code::FileNotOpened;
-    }
-
-    auto r = driver->find(*this, name);
-    if(r) {
-        r.as_value().parent = this;
-    }
-    return r;
-}
-
-inline auto OpenInfo::create(const std::string_view name, const FileType type) -> Result<OpenInfo> {
-    if(!check_opened(true)) {
-        return Error::Code::FileNotOpened;
-    }
-    return driver->create(*this, name, type);
-}
-
-inline auto OpenInfo::readdir(const size_t index) -> Result<OpenInfo> {
-    if(!check_opened(false)) {
-        return Error::Code::FileNotOpened;
-    }
-
-    auto r = driver->readdir(*this, index);
-    if(r) {
-        r.as_value().parent = this;
-    }
-    return r;
-}
-
-inline auto OpenInfo::remove(const std::string_view name) -> Error {
-    if(!check_opened(true)) {
-        return Error::Code::FileNotOpened;
-    }
-    if(children.find(std::string(name)) != children.end()) {
-        return Error::Code::FileOpened;
-    }
-    return driver->remove(*this, name);
-}
-
-inline auto OpenInfo::get_device_type() -> DeviceType {
-    if(type != FileType::Device) {
-        return DeviceType::None;
-    }
-
-    return driver->get_device_type(*this);
-}
-
-inline auto OpenInfo::create_device(const std::string_view name, const uintptr_t device_impl) -> Result<OpenInfo> {
-    if(!check_opened(true)) {
-        return Error::Code::FileNotOpened;
-    }
-
-    return driver->create_device(*this, name, device_impl);
-}
-
-inline auto OpenInfo::control_device(const DeviceOperation op, void* const arg) -> Error {
-    // TODO
-    // is this control requires write access?
-    if(!check_opened(false)) {
-        return Error::Code::FileNotOpened;
-    }
-
-    return driver->control_device(*this, op, arg);
-}
-
-inline auto OpenInfo::on_handle_create(Event& write_event) -> void {
-    driver->on_handle_create(*this, write_event);
-}
-
-inline auto OpenInfo::on_handle_update(Event& write_event) -> void {
-    driver->on_handle_update(*this, write_event);
-}
-
-inline auto OpenInfo::on_handle_destroy() -> void {
-    driver->on_handle_destroy(*this);
+inline auto Driver::create_device(OpenInfo& info, std::string_view name, uintptr_t device_impl) -> Result<OpenInfo> {
+    return Error::Code::NotImplemented;
 }
 } // namespace fs
