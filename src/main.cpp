@@ -260,16 +260,14 @@ class Kernel {
         {
             auto& manager = fs::critical_manager->unsafe_access(); // no other threads exist here
             if(const auto e = manager.mount("devfs", "/dev")) {
-                debug::println("failed to mount \"/dev\": ", e.as_int());
-                return;
+                fatal_error("failed to mount \"/dev\": ", e.as_int());
             }
         }
 
         // create uefi framebuffer
         auto gop_framebuffer = devfs::GOPFrameBuffer(framebuffer_config);
         if(fs::critical_manager->unsafe_access().create_device_file("fb-uefi0", &gop_framebuffer)) {
-            debug::println("failed to create uefi framebuffer");
-            return;
+            fatal_error("failed to create uefi framebuffer");
         }
 
         // initialize tss
@@ -349,11 +347,11 @@ class Kernel {
         }
 
         // boot aps
-        //if(acpi::madt != nullptr) {
-        //    if(const auto e = boot_aps(*ap_trampoline_page)) {
-        //        logger(LogLevel::Error, "kernel: ap boot failed: %d\n", e.as_int());
-        //    }
-        //}
+        if(acpi::madt != nullptr) {
+            if(const auto e = boot_aps(*ap_trampoline_page)) {
+                logger(LogLevel::Error, "kernel: ap boot failed: %d\n", e.as_int());
+            }
+        }
         ap_trampoline_page.free();
 
         // initialize syscall
