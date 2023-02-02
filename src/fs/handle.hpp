@@ -2,10 +2,14 @@
 #include "fs.hpp"
 
 namespace fs {
-enum class OpenMode {
-    Read,
-    Write,
+struct OpenMode {
+    bool read;
+    bool write;
 };
+
+constexpr auto open_ro = OpenMode{.read = true, .write = false};
+constexpr auto open_wo = OpenMode{.read = false, .write = true};
+constexpr auto open_rw = OpenMode{.read = true, .write = true};
 
 inline auto follow_mountpoints(fs::OpenInfo* info) -> fs::OpenInfo* {
     while(info->mount != nullptr) {
@@ -15,26 +19,43 @@ inline auto follow_mountpoints(fs::OpenInfo* info) -> fs::OpenInfo* {
 }
 
 inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
-    // the file is already write opened
-    if(info->write_count >= 1) {
-        return Error::Code::FileOpened;
+    if(mode.read) {
+        switch(info->attributes.read_level) {
+        case OpenLevel::Block:
+            return Error::Code::InvalidOpenMode;
+        case OpenLevel::Single:
+            if(info->read_count != 0) {
+                return Error::Code::FileOpened;
+            }
+            [[fallthrough]];
+        case OpenLevel::Multi:
+            if(info->attributes.exclusive && info->write_count != 0) {
+                return Error::Code::FileOpened;
+            }
+            break;
+        }
+    }
+    if(mode.write) {
+        switch(info->attributes.write_level) {
+        case OpenLevel::Block:
+            return Error::Code::InvalidOpenMode;
+        case OpenLevel::Single:
+            if(info->write_count != 0) {
+                return Error::Code::FileOpened;
+            }
+            [[fallthrough]];
+        case OpenLevel::Multi:
+            if(info->attributes.exclusive && info->read_count != 0) {
+                return Error::Code::FileOpened;
+            }
+            break;
+        }
     }
 
-    // cannot modify read opened file
-    if(info->read_count >= 1 && mode != OpenMode::Read) {
-        return Error::Code::FileOpened;
-    }
-
-    // cannot open exclusive file
-    if(info->is_exclusive() && (info->read_count >= 1 || info->write_count >= 1)) {
-        return Error::Code::FileOpened;
-    }
-
-    switch(mode) {
-    case OpenMode::Read:
+    if(mode.read) {
         info->read_count += 1;
-        break;
-    case OpenMode::Write:
+    }
+    if(mode.write) {
         info->write_count += 1;
     }
 
@@ -49,27 +70,28 @@ class Handle {
     OpenMode               mode;
     std::unique_ptr<Event> write_event; // data available
 
-    auto is_write_opened() -> bool {
-        if(mode != OpenMode::Write) {
-            logger(LogLevel::Error, "attempt to write to ro opened file \"%s\"\n", data->name.data());
-            return false;
-        }
-        return true;
-    }
-
   public:
     auto read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> {
+        if(!mode.read) {
+            return Error::Code::FileNotOpened;
+        }
+
         return data->read(offset, size, buffer);
     }
 
     auto write(const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> {
-        if(!is_write_opened()) {
+        if(!mode.write) {
             return Error::Code::FileNotOpened;
         }
+
         return data->write(offset, size, buffer);
     }
 
-    auto open(const std::string_view name, const OpenMode mode) -> Result<Handle> {
+    auto open(const std::string_view name, const OpenMode open_mode) -> Result<Handle> {
+        if(!mode.read) {
+            return Error::Code::FileNotOpened;
+        }
+
         auto& children     = data->children;
         auto  created_info = std::optional<OpenInfo>();
         auto  result       = (OpenInfo*)(nullptr);
@@ -83,46 +105,66 @@ class Handle {
             result = &created_info.emplace(std::move(find_result.as_value()));
         }
 
-        error_or(try_open(result, mode));
+        if(const auto e = try_open(result, open_mode)) {
+            return e;
+        }
 
         if(created_info) {
             auto& v = created_info.value();
             result  = &children.emplace(v.name, std::move(v)).first->second;
         }
 
-        return Handle(result, mode);
+        return Handle(result, open_mode);
     }
 
     auto find(const std::string_view name) -> Result<OpenInfo> {
+        if(!mode.read) {
+            return Error::Code::FileNotOpened;
+        }
+
         return data->find(name);
     }
 
     auto create(const std::string_view name, const FileType type) -> Error {
-        if(!is_write_opened()) {
+        if(!mode.write) {
             return Error::Code::FileNotOpened;
         }
+
         const auto r = data->create(name, type);
         return r ? Success() : r.as_error();
     }
 
     auto readdir(const size_t index) -> Result<OpenInfo> {
+        if(!mode.read) {
+            return Error::Code::FileNotOpened;
+        }
+
         return data->readdir(index);
     }
 
     auto remove(const std::string_view name) -> Error {
-        if(!is_write_opened()) {
+        if(!mode.write) {
             return Error::Code::FileNotOpened;
         }
+
         return data->remove(name);
     }
 
     auto close() -> void;
 
-    auto get_filesize() const -> size_t {
+    auto get_filesize() const -> Result<size_t> {
+        if(!mode.read) {
+            return Error::Code::FileNotOpened;
+        }
+
         return data->filesize;
     }
 
-    auto get_device_type() const -> DeviceType {
+    auto get_device_type() const -> Result<DeviceType> {
+        if(!mode.read) {
+            return Error::Code::FileNotOpened;
+        }
+
         if(data->type != FileType::Device) {
             return DeviceType::None;
         }
@@ -130,7 +172,7 @@ class Handle {
     }
 
     auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<OpenInfo> {
-        if(!is_write_opened()) {
+        if(!mode.write) {
             return Error::Code::FileNotOpened;
         }
 

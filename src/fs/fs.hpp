@@ -64,48 +64,75 @@ class Driver {
     virtual ~Driver() = default;
 };
 
+enum class OpenLevel : int {
+    Block  = 0,
+    Single = 1,
+    Multi  = 2,
+};
+
 class OpenInfo {
+  public:
+    struct Attributes {
+        OpenLevel read_level : 2;
+        OpenLevel write_level : 2;
+        bool      exclusive;
+        bool      volume_root;
+    };
+
+    // attribute templates
+    static constexpr auto default_attributes = Attributes{
+        .read_level  = OpenLevel::Single,
+        .write_level = OpenLevel::Single,
+        .exclusive   = true,
+        .volume_root = false};
+
+    static constexpr auto volume_root_attributes = Attributes{
+        .read_level  = OpenLevel::Single,
+        .write_level = OpenLevel::Single,
+        .exclusive   = true,
+        .volume_root = true};
+
   private:
     Driver*   driver;
     uintptr_t driver_data;
-    bool      volume_root;
-    bool      exclusive;
 
-    auto check_opened(const bool write) -> bool {
+    auto assert_opened(const bool write) -> bool {
         if((write && write_count == 0) || (!write && read_count == 0 && write_count == 0)) {
-            logger(LogLevel::Error, "file \"%s\" is not %s opened\n", name.data(), write ? "write" : "read");
+            // kernel bug
+            logger(LogLevel::Error, "kernel: file \"%s\" is not %s opened\n", name.data(), write ? "write" : "read");
             return false;
         }
         return true;
     }
 
   public:
-    std::string name;
-    uint32_t    read_count  = 0;
-    uint32_t    write_count = 0;
-    FileType    type;
-    size_t      filesize;
-    OpenInfo*   parent = nullptr;
-    OpenInfo*   mount  = nullptr;
+    uint32_t          read_count  = 0;
+    uint32_t          write_count = 0;
+    size_t            filesize;
+    OpenInfo*         parent = nullptr;
+    OpenInfo*         mount  = nullptr;
+    const std::string name;
+    const FileType    type;
+    const Attributes  attributes;
 
     std::unordered_map<std::string, OpenInfo> children;
 
     auto read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> {
-        if(!check_opened(false)) {
+        if(!assert_opened(false)) {
             return Error::Code::FileNotOpened;
         }
         return driver->read(*this, offset, size, buffer);
     }
 
     auto write(const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> {
-        if(!check_opened(true)) {
+        if(!assert_opened(true)) {
             return Error::Code::FileNotOpened;
         }
         return driver->write(*this, offset, size, buffer);
     }
 
     auto find(const std::string_view name) -> Result<OpenInfo> {
-        if(!check_opened(false)) {
+        if(!assert_opened(false)) {
             return Error::Code::FileNotOpened;
         }
 
@@ -117,14 +144,14 @@ class OpenInfo {
     }
 
     auto create(const std::string_view name, const FileType type) -> Result<OpenInfo> {
-        if(!check_opened(true)) {
+        if(!assert_opened(true)) {
             return Error::Code::FileNotOpened;
         }
         return driver->create(*this, name, type);
     }
 
     auto readdir(const size_t index) -> Result<OpenInfo> {
-        if(!check_opened(false)) {
+        if(!assert_opened(false)) {
             return Error::Code::FileNotOpened;
         }
 
@@ -136,7 +163,7 @@ class OpenInfo {
     }
 
     auto remove(const std::string_view name) -> Error {
-        if(!check_opened(true)) {
+        if(!assert_opened(true)) {
             return Error::Code::FileNotOpened;
         }
         if(children.find(std::string(name)) != children.end()) {
@@ -154,7 +181,7 @@ class OpenInfo {
     }
 
     auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<OpenInfo> {
-        if(!check_opened(true)) {
+        if(!assert_opened(true)) {
             return Error::Code::FileNotOpened;
         }
 
@@ -164,10 +191,6 @@ class OpenInfo {
     auto control_device(const DeviceOperation op, void* const arg) -> Error {
         // TODO
         // is this control requires write access?
-        if(!check_opened(false)) {
-            return Error::Code::FileNotOpened;
-        }
-
         return driver->control_device(*this, op, arg);
     }
 
@@ -185,14 +208,6 @@ class OpenInfo {
         return read_count != 0 || write_count != 0 || !children.empty() || mount != nullptr;
     }
 
-    auto is_volume_root() const -> bool {
-        return volume_root;
-    }
-
-    auto is_exclusive() const -> bool {
-        return exclusive;
-    }
-
     auto read_driver() const -> const Driver* {
         return driver;
     }
@@ -207,15 +222,13 @@ class OpenInfo {
              const auto             driver_data,
              const FileType         type,
              const size_t           filesize,
-             const bool             volume_root = false,
-             const bool             exclusive   = false)
+             const Attributes       attributes = default_attributes)
         : driver(&driver),
           driver_data((uintptr_t)driver_data),
-          volume_root(volume_root),
-          exclusive(exclusive),
+          filesize(filesize),
           name(name),
           type(type),
-          filesize(filesize) {}
+          attributes(attributes) {}
 };
 
 inline auto Driver::create_device(OpenInfo& info, std::string_view name, uintptr_t device_impl) -> Result<OpenInfo> {

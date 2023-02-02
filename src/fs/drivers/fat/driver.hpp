@@ -2,7 +2,6 @@
 #include <vector>
 
 #include "../../../block/block.hpp"
-#include "../../../macro.hpp"
 #include "../../handle.hpp"
 #include "fat.hpp"
 
@@ -27,8 +26,7 @@ class BlockDevice {
 
   public:
     auto init() -> Error {
-        error_or(handle.control_device(fs::DeviceOperation::GetBytesPerSector, &bytes_per_sector));
-        return Success();
+        return handle.control_device(fs::DeviceOperation::GetBytesPerSector, &bytes_per_sector);
     }
 
     auto get_bytes_per_sector() const -> size_t {
@@ -238,7 +236,7 @@ class Driver : public fs::Driver {
     BlockDevice  block;
     BPB::Summary bpb;
 
-    OpenInfo root;
+    std::optional<OpenInfo> root;
 
     auto openinfo_from_dinfo(const DirectoryInfo& d) -> OpenInfo {
         const auto type    = d.attribute & Attribute::Directory ? FileType::Directory : FileType::Regular;
@@ -249,16 +247,25 @@ class Driver : public fs::Driver {
 
   public:
     auto init() -> Error {
-        error_or(block.init());
+        if(const auto e = block.init()) {
+            return e;
+        }
         auto buffer = std::vector<uint8_t>(block.get_bytes_per_sector());
-        error_or(block.read_sector(0, 1, buffer.data()));
+
+        if(const auto e = block.read_sector(0, 1, buffer.data())) {
+            return e;
+        }
         const auto& bpb = *reinterpret_cast<BPB*>(buffer.data());
 
-        assert(bpb.signature[0] == 0x55 && bpb.signature[1] == 0xAA, Error::Code::NotFAT);
-        assert(bpb.bytes_per_sector == block.get_bytes_per_sector(), Error::Code::NotImplemented);
+        if(bpb.signature[0] != 0x55 || bpb.signature[1] != 0xAA) {
+            return Error::Code::NotFAT;
+        }
+        if(bpb.bytes_per_sector != block.get_bytes_per_sector()) {
+            return Error::Code::NotImplemented;
+        }
 
-        this->bpb  = bpb.summary();
-        this->root = OpenInfo("/", *this, this->bpb.root_cluster, FileType::Directory, true);
+        this->bpb = bpb.summary();
+        this->root.emplace(OpenInfo("/", *this, this->bpb.root_cluster, FileType::Directory, 0, OpenInfo::volume_root_attributes));
 
         return Success();
     }
@@ -363,11 +370,10 @@ class Driver : public fs::Driver {
     }
 
     auto get_root() -> OpenInfo& override {
-        return root;
+        return root.value();
     }
 
-    Driver(fs::Handle handle) : block(std::move(handle)),
-                                root("/", *this, nullptr, FileType::Directory, 0, true) {}
+    Driver(fs::Handle handle) : block(std::move(handle)) {}
 };
 #undef assert
 } // namespace fs::fat

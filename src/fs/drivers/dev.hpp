@@ -279,7 +279,7 @@ class Driver : public fs::Driver {
         }
 
         if(const auto p = devices.find(std::string(name)); p != devices.end()) {
-            return OpenInfo(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize(), false, true);
+            return OpenInfo(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize());
         } else {
             return Error::Code::NoSuchFile;
         }
@@ -298,7 +298,7 @@ class Driver : public fs::Driver {
         }
 
         const auto p = std::next(devices.begin(), index);
-        return OpenInfo(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize(), false, true);
+        return OpenInfo(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize());
     }
 
     auto remove(OpenInfo& info, const std::string_view name) -> Error override {
@@ -406,7 +406,7 @@ class Driver : public fs::Driver {
         return root;
     }
 
-    Driver() : root("/", *this, nullptr, FileType::Directory, 0, true, false) {}
+    Driver() : root("/", *this, nullptr, FileType::Directory, 0, OpenInfo::volume_root_attributes) {}
 };
 
 inline auto new_driver() -> Driver {

@@ -92,20 +92,20 @@ class Manager {
         return Handle(info, mode);
     }
 
-    auto open_parent_directory(std::vector<std::string_view>& elms, const OpenMode mode) -> Result<Handle> {
+    auto open_parent_directory(std::vector<std::string_view>& elms) -> Result<Handle> {
         if(elms.empty()) {
-            return open_root(mode);
+            return open_root(open_ro);
         }
 
         auto dirname = std::span<std::string_view>(elms.begin(), elms.size() - 1);
-        auto result  = open_root(OpenMode::Read);
+        auto result  = open_root(open_ro);
         if(!result) {
             return result.as_error();
         }
 
         for(const auto& d : dirname) {
             auto handle = std::move(result.as_value());
-            result      = handle.open(d, OpenMode::Read);
+            result      = handle.open(d, open_ro);
             close(handle);
             if(!result) {
                 return result;
@@ -116,7 +116,7 @@ class Manager {
 
     auto set_mount_driver(const std::string_view path, Driver& driver) -> Result<Handle> {
         auto volume_root = &driver.get_root();
-        auto handle_r    = open(path, OpenMode::Write);
+        auto handle_r    = open(path, open_rw);
         if(!handle_r) {
             return handle_r.as_error();
         }
@@ -126,7 +126,7 @@ class Manager {
     }
 
     auto create_fat_driver(const std::string_view device) -> Result<std::unique_ptr<fat::Driver>> {
-        auto handle_r = open(device, OpenMode::Write);
+        auto handle_r = open(device, open_rw);
         if(!handle_r) {
             return handle_r.as_error();
         }
@@ -148,7 +148,7 @@ class Manager {
         }
 
         const auto filename = elms.back();
-        auto       parent_r = open_parent_directory(elms, mode);
+        auto       parent_r = open_parent_directory(elms);
         if(!parent_r) {
             return parent_r.as_error();
         }
@@ -169,16 +169,14 @@ class Manager {
         handle.data = nullptr;
         handle.write_event.reset();
 
-        switch(handle.mode) {
-        case OpenMode::Read:
+        if(handle.mode.read) {
             node->read_count -= 1;
-            break;
-        case OpenMode::Write:
+        }
+        if(handle.mode.write) {
             node->write_count -= 1;
-            break;
         }
         while(node->parent != nullptr) {
-            if(node->is_busy() || node->is_volume_root()) {
+            if(node->is_busy() || node->attributes.volume_root) {
                 break;
             }
 
@@ -285,7 +283,7 @@ class Manager {
 
     // just a helper
     auto create_device_file(const std::string_view name, fs::dev::Device* device_impl) -> Error {
-        auto dev_r = open("/dev", fs::OpenMode::Write);
+        auto dev_r = open("/dev", open_rw);
         if(!dev_r) {
             logger(LogLevel::Error, "failed to open \"/dev\": %d\n", dev_r.as_error().as_int());
             return dev_r.as_error();

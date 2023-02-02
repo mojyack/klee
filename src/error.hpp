@@ -49,6 +49,7 @@ class [[nodiscard]] Error {
         FileExists,
         FileOpened,
         FileNotOpened,
+        InvalidOpenMode,
         VolumeMounted,
         VolumeBusy,
         NotMounted,

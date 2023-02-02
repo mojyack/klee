@@ -370,7 +370,7 @@ class Shell {
             if(argv.size() == 2) {
                 path = argv[1];
             }
-            handle_or(path, fs::OpenMode::Read);
+            handle_or(path, fs::open_ro);
             for(auto i = 0;; i += 1) {
                 const auto r = handle.readdir(i);
                 if(!r) {
@@ -390,7 +390,7 @@ class Shell {
                 return true;
             }
 
-            handle_or(argv[1], fs::OpenMode::Write);
+            handle_or(argv[1], fs::open_rw);
             if(const auto e = handle.create(argv[2], fs::FileType::Directory)) {
                 print("create error: %d\n", e.as_int());
             }
@@ -400,8 +400,13 @@ class Shell {
                 puts("usage: cat FILE");
                 return true;
             }
-            handle_or(argv[1], fs::OpenMode::Read);
-            auto           size   = handle.get_filesize();
+            handle_or(argv[1], fs::open_ro);
+            const auto size_r = handle.get_filesize();
+            if(!size_r) {
+                print("failed to get filesize: %d\n", size_r.as_error().as_int());
+                return true;
+            }
+            auto           size   = size_r.as_value();
             auto           offset = 0;
             constexpr auto chunk  = size_t(64);
             auto           buffer = std::array<char, chunk>();
@@ -429,7 +434,7 @@ class Shell {
                 puts("usage: run FILE");
                 return true;
             }
-            handle_or(argv[1], fs::OpenMode::Read);
+            handle_or(argv[1], fs::open_ro);
             const auto num_frames         = (handle.get_filesize() + bytes_per_frame - 1) / bytes_per_frame;
             auto       code_frames_result = allocator->allocate(num_frames);
             if(!code_frames_result) {
@@ -498,15 +503,16 @@ class Shell {
 
 #undef handle_or
 
-#define handle_or(var, path, mode)                                     \
-    auto var##_result = Result<fs::Handle>();                          \
-    {                                                                  \
-        auto [lock, manager] = fs::critical_manager->access();         \
-        var##_result         = manager.open(path, fs::OpenMode::mode); \
-    }                                                                  \
-    if(!var##_result) {                                                \
-        process::manager->exit_this_thread();                          \
-    }                                                                  \
+#define handle_or(var, path, mode)                                      \
+    auto var##_result = Result<fs::Handle>();                           \
+    {                                                                   \
+        auto [lock, manager] = fs::critical_manager->access();          \
+        var##_result         = manager.open(path, mode);                \
+    }                                                                   \
+    if(!var##_result) {                                                 \
+        printk("terminal: handle error %d\n", var##_result.as_error()); \
+        process::manager->exit_this_thread();                           \
+    }                                                                   \
     auto& var = var##_result.as_value();
 
 #define return_or(exp) \
@@ -546,8 +552,8 @@ inline auto shell_main(const uint64_t id, const int64_t data) -> void {
 
 inline auto terminal_main(const char** const fb_device) -> void {
     // open devices
-    handle_or(keyboard, "/dev/keyboard-usb0", Read);
-    handle_or(framebuffer, *fb_device, Write);
+    handle_or(keyboard, "/dev/keyboard-usb0", fs::open_ro);
+    handle_or(framebuffer, *fb_device, fs::open_wo);
 
     // get framebuffer config
     auto fb_size            = std::array<size_t, 2>();

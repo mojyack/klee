@@ -47,7 +47,7 @@ class Driver : public fs::Driver {
         return root;
     }
 
-    Driver() : root("/", *this, nullptr, FileType::Directory, 0, true) {}
+    Driver() : root("/", *this, nullptr, FileType::Directory, 0, OpenInfo::volume_root_attributes) {}
 };
 
 inline auto new_driver() -> Driver {

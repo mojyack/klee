@@ -1,10 +1,8 @@
 #pragma once
-#include <functional>
 #include <string>
 #include <variant>
 #include <vector>
 
-#include "../../macro.hpp"
 #include "../../memory-manager.hpp"
 #include "../fs.hpp"
 
@@ -234,6 +232,6 @@ class Driver : public fs::Driver {
     }
 
     Driver() : data(Directory("/")),
-               root("/", *this, &data, FileType::Directory, 0, true) {}
+               root("/", *this, &data, FileType::Directory, 0, OpenInfo::volume_root_attributes) {}
 };
 } // namespace fs::tmp
