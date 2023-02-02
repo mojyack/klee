@@ -243,9 +243,8 @@ class EventsWaiter {
 #define handle_or(path, mode)                                       \
     auto handle_result = Result<fs::Handle>();                      \
     {                                                               \
-        auto [lock, manager] = fs::manager->access();               \
-        auto& root           = manager.get_fs_root();               \
-        handle_result        = root.open(path, mode);               \
+        auto [lock, manager] = fs::critical_manager->access();      \
+        handle_result        = manager.open(path, mode);            \
     }                                                               \
     if(!handle_result) {                                            \
         print("open error: %d", handle_result.as_error().as_int()); \
@@ -311,12 +310,6 @@ class Shell {
         return result;
     }
 
-    auto close_handle(fs::Handle handle) -> void {
-        auto [lock, manager] = fs::manager->access();
-        auto& root           = manager.get_fs_root();
-        root.close(std::move(handle));
-    }
-
     auto interpret(const std::string_view arg) -> bool {
         const auto argv = split(arg);
         if(argv.size() == 0) {
@@ -336,7 +329,7 @@ class Shell {
             if(argv.size() == 1) {
                 auto mounts = std::vector<std::array<std::string, 2>>();
                 {
-                    auto [lock, manager] = fs::manager->access();
+                    auto [lock, manager] = fs::critical_manager->access();
                     mounts               = manager.get_mounts();
                 }
                 if(mounts.empty()) {
@@ -349,7 +342,7 @@ class Shell {
             } else if(argv.size() == 3) {
                 auto e = Error();
                 {
-                    auto [lock, manager] = fs::manager->access();
+                    auto [lock, manager] = fs::critical_manager->access();
                     e                    = manager.mount(argv[1], argv[2]);
                 }
                 if(e) {
@@ -366,7 +359,7 @@ class Shell {
             }
             auto e = Error();
             {
-                auto [lock, manager] = fs::manager->access();
+                auto [lock, manager] = fs::critical_manager->access();
                 e                    = manager.unmount(argv[1]);
             }
             if(e) {
@@ -391,7 +384,6 @@ class Shell {
                 puts(o.name);
                 putc('\n');
             }
-            close_handle(std::move(handle));
         } else if(argv[0] == "mkdir") {
             if(argv.size() != 3) {
                 puts("usage: mkdir DIR NAME");
@@ -402,7 +394,6 @@ class Shell {
             if(const auto e = handle.create(argv[2], fs::FileType::Directory)) {
                 print("create error: %d\n", e.as_int());
             }
-            close_handle(std::move(handle));
             return true;
         } else if(argv[0] == "cat") {
             if(argv.size() != 2) {
@@ -419,7 +410,6 @@ class Shell {
                 auto       read_result = size_t();
                 if(const auto read = handle.read(offset, read_size, buffer.data()); !read) {
                     print("read error: %d\n", read.as_error().as_int());
-                    close_handle(std::move(handle));
                     return true;
                 } else {
                     read_result = read.as_value();
@@ -434,7 +424,6 @@ class Shell {
                 offset += read_size;
                 puts({buffer.data(), read_result});
             }
-            close_handle(std::move(handle));
         } else if(argv[0] == "run") {
             if(argv.size() != 2) {
                 puts("usage: run FILE");
@@ -445,16 +434,13 @@ class Shell {
             auto       code_frames_result = allocator->allocate(num_frames);
             if(!code_frames_result) {
                 print("failed to allocate frames for code: %d\n", code_frames_result.as_error());
-                close_handle(std::move(handle));
                 return true;
             }
             auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(std::move(code_frames_result.as_value())));
             if(const auto read = handle.read(0, handle.get_filesize(), (*code_frames)->get_frame()); !read) {
                 print("file read error: %d\n", read.as_error().as_int());
-                close_handle(std::move(handle));
                 return true;
             }
-            close_handle(std::move(handle));
 
             const auto pid   = process::manager->create_process();
             const auto tid_r = process::manager->create_thread(pid, process::elf_startup, reinterpret_cast<uint64_t>(code_frames.release()));
@@ -512,16 +498,15 @@ class Shell {
 
 #undef handle_or
 
-#define handle_or(var, path, mode)                                  \
-    auto var##_result = Result<fs::Handle>();                       \
-    {                                                               \
-        auto [lock, manager] = fs::manager->access();               \
-        auto& root           = manager.get_fs_root();               \
-        var##_result         = root.open(path, fs::OpenMode::mode); \
-    }                                                               \
-    if(!var##_result) {                                             \
-        process::manager->exit_this_thread();                       \
-    }                                                               \
+#define handle_or(var, path, mode)                                     \
+    auto var##_result = Result<fs::Handle>();                          \
+    {                                                                  \
+        auto [lock, manager] = fs::critical_manager->access();         \
+        var##_result         = manager.open(path, fs::OpenMode::mode); \
+    }                                                                  \
+    if(!var##_result) {                                                \
+        process::manager->exit_this_thread();                          \
+    }                                                                  \
     auto& var = var##_result.as_value();
 
 #define return_or(exp) \
@@ -633,12 +618,6 @@ inline auto terminal_main(const char** const fb_device) -> void {
 
     if(const auto e = process::manager->wait_thread(this_process->id, shell_thread)) {
         panic("failed to wait for shell thread", e.as_int());
-    }
-    {
-        auto [lock, manager] = fs::manager->access();
-        auto& root           = manager.get_fs_root();
-        root.close(std::move(framebuffer));
-        root.close(std::move(keyboard));
     }
 }
 

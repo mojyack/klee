@@ -77,6 +77,7 @@ class Event {
 
   public:
     auto wait() -> void {
+        if(id == 0)debug::println("event wait ", id);
         while(!flag.test()) {
             if(const auto e = process::manager->wait_event(id)) {
                 logger(LogLevel::Error, "mutex: failed to wait event %lu(%lu)\n", id, e.as_int());
@@ -85,6 +86,7 @@ class Event {
     }
 
     auto notify() -> void {
+        if(id == 0)debug::println("event notify ", id);
         if(!flag.test_and_set()) {
             if(const auto e = process::manager->notify_event(id)) {
                 logger(LogLevel::Error, "mutex: failed to notify event %lu(%lu)\n", id, e.as_int());

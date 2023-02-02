@@ -42,15 +42,13 @@ inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
     return Success();
 }
 
-class Controller;
-
 class Handle {
-    friend class Controller;
+    friend class Manager;
 
   private:
-    OpenInfo* data;
-    OpenMode  mode;
-    Event     write_event; // data available
+    OpenInfo*              data = nullptr;
+    OpenMode               mode;
+    std::unique_ptr<Event> write_event; // data available
 
     auto is_write_opened() -> bool {
         if(mode != OpenMode::Write) {
@@ -119,6 +117,8 @@ class Handle {
         return data->remove(name);
     }
 
+    auto close() -> void;
+
     auto get_filesize() const -> size_t {
         return data->filesize;
     }
@@ -143,33 +143,35 @@ class Handle {
     }
 
     auto read_event() -> Event& {
-        return write_event;
+        return *write_event;
     }
 
     auto operator=(Handle&& o) -> Handle& {
-        data        = o.data;
-        mode        = o.mode;
-        write_event = std::move(o.write_event);
-        data->on_handle_update(write_event);
+        close();
+        std::swap(data, o.data);
+        mode = o.mode;
+        std::swap(write_event, o.write_event);
         return *this;
     }
+
+    Handle() = default;
 
     Handle(Handle&& o) {
         *this = std::move(o);
     }
 
     Handle(OpenInfo* const data, const OpenMode mode) : data(data), mode(mode) {
-        data->on_handle_create(write_event);
+        write_event.reset(new Event());
+        data->on_handle_create(*write_event);
     }
 
     ~Handle() {
-        if(write_event.is_valid()) {
-            data->on_handle_destroy();
-        }
+        close();
     }
 };
 
-class Controller {
+/*
+class Controller_ {
   private:
     basic::Driver       basic_driver;
     OpenInfo&           root;
@@ -318,4 +320,5 @@ class Controller {
 
     Controller() : root(basic_driver.get_root()) {}
 };
+*/
 } // namespace fs

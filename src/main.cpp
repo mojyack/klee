@@ -2,7 +2,7 @@
 #include "ahci/ahci.hpp"
 #include "debug.hpp"
 #include "devfs/framebuffer.hpp"
-#include "fs/manager-impl.hpp"
+#include "fs/manager.hpp"
 #include "interrupt/interrupt.hpp"
 #include "keyboard.hpp"
 #include "lapic/timer.hpp"
@@ -253,12 +253,12 @@ class Kernel {
         process::manager = &pm;
 
         // create filesystem mananger
-        auto fs_manager = Critical<fs::FilesystemManager>();
-        fs::manager     = &fs_manager;
+        auto fs_manager = Critical<fs::Manager>();
+        fs::critical_manager     = &fs_manager;
 
         // - mount "/dev"
         {
-            auto& manager = fs::manager->unsafe_access(); // no other threads exist here
+            auto& manager = fs::critical_manager->unsafe_access(); // no other threads exist here
             if(const auto e = manager.mount("devfs", "/dev")) {
                 debug::println("failed to mount \"/dev\": ", e.as_int());
                 return;
@@ -267,7 +267,7 @@ class Kernel {
 
         // create uefi framebuffer
         auto gop_framebuffer = devfs::GOPFrameBuffer(framebuffer_config);
-        if(fs::manager->unsafe_access().create_device_file("fb-uefi0", &gop_framebuffer)) {
+        if(fs::critical_manager->unsafe_access().create_device_file("fb-uefi0", &gop_framebuffer)) {
             debug::println("failed to create uefi framebuffer");
             return;
         }
@@ -310,7 +310,7 @@ class Kernel {
 
         // --- connect usb devices
         if(usb_keyboard) {
-            if(const auto e = fs::manager->unsafe_access().create_device_file("keyboard-usb0", usb_keyboard.get())) {
+            if(const auto e = fs::critical_manager->unsafe_access().create_device_file("keyboard-usb0", usb_keyboard.get())) {
                 logger(LogLevel::Error, "kernel: failed to create keyboard device file: %d\n", e.as_int());
             } else {
                 keyboard::setup(*usb_keyboard.get());
@@ -349,11 +349,11 @@ class Kernel {
         }
 
         // boot aps
-        if(acpi::madt != nullptr) {
-            if(const auto e = boot_aps(*ap_trampoline_page)) {
-                logger(LogLevel::Error, "kernel: ap boot failed: %d\n", e.as_int());
-            }
-        }
+        //if(acpi::madt != nullptr) {
+        //    if(const auto e = boot_aps(*ap_trampoline_page)) {
+        //        logger(LogLevel::Error, "kernel: ap boot failed: %d\n", e.as_int());
+        //    }
+        //}
         ap_trampoline_page.free();
 
         // initialize syscall
@@ -419,7 +419,7 @@ class Kernel {
                 break;
             case MessageType::VirtIOGPUNewDevice: {
                 virtio_gpu_framebuffer = virtio_gpu->create_devfs_framebuffer();
-                if(const auto e = fs::manager->access().second.create_device_file("fb-virtio0", virtio_gpu_framebuffer.get())) {
+                if(const auto e = fs::critical_manager->access().second.create_device_file("fb-virtio0", virtio_gpu_framebuffer.get())) {
                     logger(LogLevel::Error, "kernel: failed to create virtio gpu device file: %d\n", e.as_int());
                 }
                 terminal_fb_dev = "/dev/fb-virtio0";

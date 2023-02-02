@@ -57,7 +57,6 @@ class Driver {
     }
 
     virtual auto on_handle_create(OpenInfo& info, Event& write_event) -> void {}
-    virtual auto on_handle_update(OpenInfo& info, Event& write_event) -> void {}
     virtual auto on_handle_destroy(OpenInfo& info) -> void {}
 
     virtual auto get_root() -> OpenInfo& = 0;
@@ -71,7 +70,6 @@ class OpenInfo {
     uintptr_t driver_data;
     bool      volume_root;
     bool      exclusive;
-    bool      permanent; // even if the volume is unmounted, this OpenInfo is not deleted
 
     auto check_opened(const bool write) -> bool {
         if((write && write_count == 0) || (!write && read_count == 0 && write_count == 0)) {
@@ -178,10 +176,6 @@ class OpenInfo {
         driver->on_handle_create(*this, write_event);
     }
 
-    auto on_handle_update(Event& write_event) -> void {
-        driver->on_handle_update(*this, write_event);
-    }
-
     auto on_handle_destroy() -> void {
         driver->on_handle_destroy(*this);
     }
@@ -199,10 +193,6 @@ class OpenInfo {
         return exclusive;
     }
 
-    auto is_permanent() const -> bool {
-        return permanent;
-    }
-
     auto read_driver() const -> const Driver* {
         return driver;
     }
@@ -218,13 +208,11 @@ class OpenInfo {
              const FileType         type,
              const size_t           filesize,
              const bool             volume_root = false,
-             const bool             exclusive   = false,
-             const bool             permanent   = false)
+             const bool             exclusive   = false)
         : driver(&driver),
           driver_data((uintptr_t)driver_data),
           volume_root(volume_root),
           exclusive(exclusive),
-          permanent(permanent),
           name(name),
           type(type),
           filesize(filesize) {}

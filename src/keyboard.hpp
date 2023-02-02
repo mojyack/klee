@@ -53,7 +53,6 @@ enum Modifiers {
 inline auto setup(devfs::USBKeyboard& devfs_usb_keyboard) -> void {
     usb::HIDKeyboardDriver::default_observer = [&devfs_usb_keyboard](const uint8_t modifier, const uint8_t keycode) -> void {
         const bool shift = (modifier & (Modifiers::LShift | Modifiers::RShift)) != 0;
-
         devfs_usb_keyboard.push_packet(fs::dev::KeyboardPacket{keycode, modifier, !shift ? internal::ascii_table[keycode] : internal::ascii_table_shift[keycode]});
     };
 }
