@@ -435,14 +435,21 @@ class Shell {
                 return true;
             }
             handle_or(argv[1], fs::open_ro);
-            const auto num_frames         = (handle.get_filesize() + bytes_per_frame - 1) / bytes_per_frame;
+            const auto image_size_r = handle.get_filesize();
+            if(!image_size_r) {
+                print("failed to get filesize: %d\n", image_size_r.as_error().as_int());
+                return true;
+            }
+            const auto image_size = image_size_r.as_value();
+
+            const auto num_frames         = (image_size + bytes_per_frame - 1) / bytes_per_frame;
             auto       code_frames_result = allocator->allocate(num_frames);
             if(!code_frames_result) {
                 print("failed to allocate frames for code: %d\n", code_frames_result.as_error());
                 return true;
             }
             auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(std::move(code_frames_result.as_value())));
-            if(const auto read = handle.read(0, handle.get_filesize(), (*code_frames)->get_frame()); !read) {
+            if(const auto read = handle.read(0, image_size, (*code_frames)->get_frame()); !read) {
                 print("file read error: %d\n", read.as_error().as_int());
                 return true;
             }
