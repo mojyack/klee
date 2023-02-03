@@ -22,7 +22,7 @@ struct alignas(16) ThreadContext {
 
 struct PageMap {
     paging::PageDirectoryPointerTable upper_page_map; // 0xFFFF800000000000 ~ 0xFFFF807FFFFFFFFF
-    std::vector<SmartFrameID>         allocated_frames;
+    std::vector<SmartSingleFrameID>   allocated_frames;
 };
 
 using ThreadEntry = void(uint64_t data, int64_t id);

@@ -49,8 +49,8 @@ struct ProgramHeader {
     }
 
 struct LoadedELF {
-    std::vector<SmartFrameID> allocated_frames;
-    void*                     entry;
+    std::vector<SmartSingleFrameID> allocated_frames;
+    void*                           entry;
 };
 
 static_assert(paging::bytes_per_page == bytes_per_frame);
@@ -80,11 +80,11 @@ inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdp
     segment_first = segment_first & 0xFFFF'FFFF'FFFF'F000;
 
     const auto num_frames       = (segment_last - segment_first + bytes_per_frame - 1) / bytes_per_frame;
-    auto       allocated_frames = std::vector<SmartFrameID>(num_frames);
+    auto       allocated_frames = std::vector<SmartSingleFrameID>(num_frames);
     for(auto i = 0; i < allocated_frames.size(); i += 1) {
         auto& f = allocated_frames[i];
 
-        if(auto r = allocator->allocate(1); !r) {
+        if(auto r = allocator->allocate_single(); !r) {
             return r.as_error();
         } else {
             f = std::move(r.as_value());

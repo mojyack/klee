@@ -29,7 +29,7 @@ inline auto elf_prepare(const int64_t data, Thread* const thread) -> std::option
     constexpr auto max_address      = 0xFFFF'807F'FFFF'FFFFu; // this is max available address, because pml4 index is fixed to 256
     constexpr auto stack_frame_addr = max_address - 0x0FFFu;
 
-    auto stack_frame = allocator->allocate(1);
+    auto stack_frame = allocator->allocate_single();
     if(!stack_frame) {
         logger(LogLevel::Error, "failed to allocate frame for application stack");
         return std::nullopt;

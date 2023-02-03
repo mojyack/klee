@@ -96,6 +96,44 @@ class SmartFrameID {
     }
 };
 
+class SmartSingleFrameID {
+  private:
+    FrameID id = nullframe;
+
+  public:
+    auto free() -> void;
+
+    auto operator=(SmartSingleFrameID&& o) -> SmartSingleFrameID& {
+        free();
+        std::swap(id, o.id);
+        return *this;
+    }
+
+    auto operator->() -> FrameID* {
+        return &id;
+    }
+
+    auto operator*() -> FrameID {
+        return id;
+    }
+
+    operator bool() const {
+        return id != nullframe;
+    }
+
+    SmartSingleFrameID(SmartSingleFrameID&& o) {
+        *this = std::move(o);
+    }
+
+    SmartSingleFrameID() = default;
+
+    SmartSingleFrameID(const FrameID id) : id(id) {}
+
+    ~SmartSingleFrameID() {
+        free();
+    }
+};
+
 class BitmapMemoryManager {
   private:
     using MaplineType = uint64_t;
@@ -155,6 +193,17 @@ class BitmapMemoryManager {
         }
         start_frame_id += i + 1;
         goto loop;
+    }
+
+    auto allocate_single() -> Result<SmartSingleFrameID> {
+        for(auto i = range_begin.get_id(); i <= range_end.get_id(); i += 1) {
+            const auto id = FrameID(i);
+            if(!get_bit(id)) {
+                set_bit(id, true);
+                return SmartSingleFrameID(id);
+            }
+        }
+        return Error::Code::NoEnoughMemory;
     }
 
     auto deallocate(const FrameID begin, const size_t frames) -> Error {
@@ -227,6 +276,13 @@ inline auto allocator = (BitmapMemoryManager*)(nullptr);
 inline auto SmartFrameID::free() -> void {
     if(id != nullframe) {
         fatal_assert(!allocator->deallocate(id, frames), "failed to deallocate memory");
+        id = nullframe;
+    }
+}
+
+inline auto SmartSingleFrameID::free() -> void {
+    if(id != nullframe) {
+        fatal_assert(!allocator->deallocate(id, 1), "failed to deallocate memory");
         id = nullframe;
     }
 }

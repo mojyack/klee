@@ -118,20 +118,20 @@ inline auto apply_segments(GDT& gdt) -> void {
 
 struct TSSResource {
     std::unique_ptr<TaskStateSegment> tss;
-    SmartFrameID                      rsp_stack;
-    SmartFrameID                      rst_stack;
+    SmartSingleFrameID                rsp_stack;
+    SmartSingleFrameID                rst_stack;
 };
 
 inline auto setup_tss(GDT& gdt) -> Result<TSSResource> {
-    auto rsp_stack = SmartFrameID();
-    if(auto r = allocator->allocate(1); !r) {
+    auto rsp_stack = SmartSingleFrameID();
+    if(auto r = allocator->allocate_single(); !r) {
         return r.as_error();
     } else {
         rsp_stack = std::move(r.as_value());
     }
 
-    auto rst_stack = SmartFrameID();
-    if(auto r = allocator->allocate(1); !r) {
+    auto rst_stack = SmartSingleFrameID();
+    if(auto r = allocator->allocate_single(); !r) {
         return r.as_error();
     } else {
         rst_stack = std::move(r.as_value());

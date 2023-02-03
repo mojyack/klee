@@ -93,8 +93,8 @@ class OpenInfo {
         .volume_root = true};
 
   private:
-    Driver*   driver;
-    uintptr_t driver_data;
+    Driver* const driver;
+    uintptr_t     driver_data;
 
     auto assert_opened(const bool write) -> bool {
         if((write && write_count == 0) || (!write && read_count == 0 && write_count == 0)) {

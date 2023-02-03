@@ -28,8 +28,8 @@ concept FileObject = std::is_same_v<T, File> || std::is_same_v<T, Directory>;
 
 class File : public Object {
   private:
-    size_t                    filesize = 0;
-    std::vector<SmartFrameID> data;
+    size_t                          filesize = 0;
+    std::vector<SmartSingleFrameID> data;
 
     auto data_at(const size_t index) -> uint8_t* {
         return static_cast<uint8_t*>(data[index]->get_frame());
@@ -91,9 +91,9 @@ class File : public Object {
         const auto new_data_size = (new_size + bytes_per_frame - 1) / bytes_per_frame;
         const auto old_data_size = data.size();
         if(new_data_size > old_data_size) {
-            auto new_frames = std::vector<SmartFrameID>(new_data_size - old_data_size);
+            auto new_frames = std::vector<SmartSingleFrameID>(new_data_size - old_data_size);
             for(auto& f : new_frames) {
-                if(auto r = allocator->allocate(1); !r) {
+                if(auto r = allocator->allocate_single(); !r) {
                     return r.as_error();
                 } else {
                     f = std::move(r.as_value());

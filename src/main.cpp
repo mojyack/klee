@@ -225,9 +225,9 @@ class Kernel {
         paging::apply_pml4_table(processor_resource.pml4_table);
         // - allocate lowest page for ap startup
         auto kernel_heap        = SmartFrameID();
-        auto ap_trampoline_page = SmartFrameID();
+        auto ap_trampoline_page = SmartSingleFrameID();
         {
-            auto r = memory_manager.allocate(1);                // this allocate must be performed before heap initialize
+            auto r = memory_manager.allocate_single();          // this allocate must be performed before heap initialize
             if(auto r = memory_manager.initialize_heap(); !r) { // initialize heap here for printk
                 fatal_error("failed to initialize heap memory");
             } else {
