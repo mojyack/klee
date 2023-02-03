@@ -69,6 +69,7 @@ out/volume:
 	scripts/createimage.sh $@
 
 apps:
+	mkdir -p out/apps
 	$(MAKE) -C apps INCLUDES="$(INCLUDES)" COMMON_FLAGS="$(COMMON_FLAGS)" LIBRARY="$(LIBRARY)" all
 
 run_prep: out/volume out/loader.efi out/kernel.elf apps ovmf/OVMF.fd
