@@ -6,6 +6,7 @@
 #include "../lapic/registers.hpp"
 #include "../log.hpp"
 #include "../pci.hpp"
+#include "../util/coroutine.hpp"
 #include "pci.hpp"
 #include "queue.hpp"
 
@@ -223,126 +224,152 @@ class Framebuffer : public fs::dev::FramebufferDevice {
 
 class GPUDevice {
   private:
+    struct ResumeArg {
+        internal::ControlHeader* request;
+        internal::ControlHeader* response;
+    };
+
+    using Worker = CoRoutine<ResumeArg, Error>;
+
     queue::Queue control_queue;
     queue::Queue cursor_queue;
 
-    enum class SetupStage {
-        Init,
-        DisplayInfo,
-        HostResource1,
-        HostResource,
-        Attach1,
-        Attach,
-    };
-
-    SetupStage setup_stage = SetupStage::Init;
-
     std::array<uint32_t, 2>                                  display_size = {1024, 768};
     std::pair<std::array<memory::SmartFrameID, 2>, uint64_t> framebuffer;
+    Worker                                                   worker;
     uint32_t                                                 sync_done       = 1;
     Event**                                                  sync_done_event = nullptr;
 
   public:
+    auto worker_main() -> Worker::Generator {
+        using namespace internal;
+
+        auto& request  = worker.resume_arg.request;
+        auto& response = worker.resume_arg.response;
+
+        // display info
+        {
+            if(request->type != Control::GetDisplayInfo) {
+                logger(LogLevel::Error, "virtio: gpu: request out of order %d %x, %x\n", request->type, &worker, this);
+                co_return Error::Code::VirtIOOperationOutOfOrder;
+            }
+
+            if(response->type != Control::OkDisplayInfo) {
+                logger(LogLevel::Error, "virtio: gpu: failed to get display info\n");
+                co_return Error::Code::VirtIODisplayInfo;
+            }
+
+            // const auto request_data = std::bit_cast<std::byte*>(request) + sizeof(ControlHeader);
+            const auto payload = std::bit_cast<std::byte*>(response) + sizeof(ControlHeader);
+
+            const auto& info  = *std::bit_cast<GetDisplayInfoResponse*>(payload);
+            auto        found = false;
+            for(auto i = 0; i < GetDisplayInfoResponse::info_size; i += 1) {
+                const auto& d = info.modes[i];
+                if(d.enabled == 0) {
+                    continue;
+                }
+                display_size = {d.rect.width, d.rect.height};
+                found        = true;
+                break;
+            }
+            if(!found) {
+                co_return Error::Code::VirtIODisplayInfo;
+            }
+
+            queue_data<ResourceCreate2DRequest>(control_queue, {Control::ResourceCreate2D, 0, 0, 0}, {1, Formats::B8G8R8X8Unorm, display_size[0], display_size[1]});
+            queue_data<ResourceCreate2DRequest>(control_queue, {Control::ResourceCreate2D, 0, 0, 0}, {2, Formats::B8G8R8X8Unorm, display_size[0], display_size[1]});
+            control_queue.notify_device();
+            co_yield Success();
+        }
+
+        // create resource
+        for(auto i = 0; i < 2; i += 1) {
+            if(request->type != Control::ResourceCreate2D) {
+                logger(LogLevel::Error, "virtio: gpu: request out of order\n");
+                co_return Error::Code::VirtIOOperationOutOfOrder;
+            }
+
+            if(response->type != Control::OkNodata) {
+                logger(LogLevel::Error, "virtio: gpu: failed to get create host resource %08x\n", response->type);
+                co_return Error::Code::VirtIOCreateResource;
+            }
+
+            const auto request_data = std::bit_cast<std::byte*>(request) + sizeof(ControlHeader);
+
+            const auto resource_id = std::bit_cast<ResourceCreate2DRequest*>(request_data)->resource_id;
+            const auto fb_bytes    = display_size[0] * display_size[1] * 4;
+            const auto fb_frames   = (fb_bytes + memory::bytes_per_frame - 1) / memory::bytes_per_frame;
+            if(auto r = memory::allocate(fb_frames); !r) {
+                logger(LogLevel::Error, "virtio: gpu: failed to get allocate framebuffer %d\n", r.as_error());
+                co_return Error::Code::NoEnoughMemory;
+            } else {
+                framebuffer.first[resource_id - 1] = std::move(r.as_value());
+                framebuffer.second                 = fb_frames;
+            }
+
+            const auto b  = static_cast<std::byte*>(control_queue.get_next_descriptor_buffer(sizeof(ControlHeader) + sizeof(ResourceAttachBackingRequest) + sizeof(internal::ResourceAttachBackingRequest::MemEntry)));
+            const auto h  = std::bit_cast<ControlHeader*>(b + 0);
+            const auto p  = std::bit_cast<ResourceAttachBackingRequest*>(b + sizeof(ControlHeader));
+            *h            = {Control::ResourceAttachBacking, 0, 0, 0};
+            *p            = {resource_id, 1};
+            p->entries[0] = {std::bit_cast<uint64_t>(framebuffer.first[resource_id - 1]->get_frame()), fb_bytes};
+            control_queue.notify_device();
+            co_yield Success();
+        }
+
+        // attach backing memory
+        for(auto i = 0; i < 2; i += 1) {
+            if(request->type != Control::ResourceAttachBacking) {
+                logger(LogLevel::Error, "virtio: gpu: request out of order\n");
+                co_return Error::Code::VirtIOOperationOutOfOrder;
+            }
+
+            if(response->type != Control::OkNodata) {
+                logger(LogLevel::Error, "virtio: gpu: failed to attach backing memory: %08x\n", response->type);
+                co_return Error::Code::VirtIOAttachBacking;
+            }
+
+            if(i == 0) {
+                co_yield Success();
+            }
+        }
+
+        process::manager->post_kernel_message_with_cli(MessageType::VirtIOGPUNewDevice);
+        co_yield Success();
+
+    loop:
+        switch(request->type) {
+        case Control::SetScanout:
+        case Control::TransferToHost2D:
+        case Control::ResourceFlush:
+            if(response->type != Control::OkNodata) {
+                logger(LogLevel::Error, "virtio: gpu: device operation %d failed: %08x\n", request->type, response->type);
+                co_return Error::Code::VirtIOProcessEvent;
+            }
+            break;
+        default:
+            logger(LogLevel::Error, "virtio: gpu: unhandled response type %x\n", request->type);
+            co_return Error::Code::VirtIOUnknownEvent;
+        }
+        co_yield Success();
+        goto loop;
+    }
+
     auto process_control_queue() -> Error {
         auto request  = (internal::ControlHeader*)(nullptr);
         auto response = (internal::ControlHeader*)(nullptr);
-        while(control_queue.read_one_buffer(reinterpret_cast<void**>(&request), reinterpret_cast<void**>(&response))) {
+        while(control_queue.read_one_buffer(std::bit_cast<void**>(&request), std::bit_cast<void**>(&response))) {
             if(request == nullptr || response == nullptr) {
                 continue;
             }
-            const auto request_data = reinterpret_cast<uint8_t*>(request) + sizeof(internal::ControlHeader);
-            const auto payload      = reinterpret_cast<uint8_t*>(response) + sizeof(internal::ControlHeader);
-            switch(request->type) {
-            case internal::Control::GetDisplayInfo: {
-                if(response->type != internal::Control::OkDisplayInfo) {
-                    logger(LogLevel::Error, "failed to get display info\n");
-                    break;
-                }
-                if(setup_stage != SetupStage::Init) {
-                    break;
-                }
-                const auto& info = *reinterpret_cast<internal::GetDisplayInfoResponse*>(payload);
-                for(auto i = 0; i < internal::GetDisplayInfoResponse::info_size; i += 1) {
-                    const auto& d = info.modes[i];
-                    if(d.enabled == 0) {
-                        continue;
-                    }
-                    display_size = {d.rect.width, d.rect.height};
-                    setup_stage  = SetupStage::DisplayInfo;
-                    break;
-                }
-
-                if(setup_stage != SetupStage::DisplayInfo) {
-                    break;
-                }
-
-                internal::queue_data<internal::ResourceCreate2DRequest>(control_queue, {internal::Control::ResourceCreate2D, 0, 0, 0}, {1, internal::Formats::B8G8R8X8Unorm, display_size[0], display_size[1]});
-                internal::queue_data<internal::ResourceCreate2DRequest>(control_queue, {internal::Control::ResourceCreate2D, 0, 0, 0}, {2, internal::Formats::B8G8R8X8Unorm, display_size[0], display_size[1]});
-                control_queue.notify_device();
-            } break;
-            case internal::Control::ResourceCreate2D: {
-                if(response->type != internal::Control::OkNodata) {
-                    logger(LogLevel::Error, "failed to get create host resource %08x\n", response->type);
-                    break;
-                }
-
-                if(setup_stage == SetupStage::DisplayInfo) {
-                    setup_stage = SetupStage::HostResource1;
-                } else if(setup_stage == SetupStage::HostResource1) {
-                    setup_stage = SetupStage::HostResource;
-                } else {
-                    break;
-                }
-
-                const auto resource_id = reinterpret_cast<internal::ResourceCreate2DRequest*>(request_data)->resource_id;
-                const auto fb_bytes    = display_size[0] * display_size[1] * 4;
-                const auto fb_frames   = (fb_bytes + memory::bytes_per_frame - 1) / memory::bytes_per_frame;
-                if(auto r = memory::allocate(fb_frames); !r) {
-                    logger(LogLevel::Error, "virtio: gpu: failed to get allocate framebuffer %d\n", r.as_error());
-                } else {
-                    framebuffer.first[resource_id - 1] = std::move(r.as_value());
-                    framebuffer.second                 = fb_frames;
-                }
-
-                const auto b  = static_cast<uint8_t*>(control_queue.get_next_descriptor_buffer(sizeof(internal::ControlHeader) + sizeof(internal::ResourceAttachBackingRequest) + sizeof(internal::ResourceAttachBackingRequest::MemEntry)));
-                const auto h  = reinterpret_cast<internal::ControlHeader*>(b + 0);
-                const auto p  = reinterpret_cast<internal::ResourceAttachBackingRequest*>(b + sizeof(internal::ControlHeader));
-                *h            = {internal::Control::ResourceAttachBacking, 0, 0, 0};
-                *p            = {resource_id, 1};
-                p->entries[0] = {reinterpret_cast<uint64_t>(framebuffer.first[resource_id - 1]->get_frame()), fb_bytes};
-                control_queue.notify_device();
-                break;
+            if(const auto e = worker.resume({request, response})) {
+                logger(LogLevel::Error, "virtio: gpu: worker returned an error: %d\n", e.as_int());
+                return e;
             }
-            case internal::Control::ResourceAttachBacking: {
-                if(response->type != internal::Control::OkNodata) {
-                    logger(LogLevel::Error, "failed to get attach backing memory %08x\n", response->type);
-                    break;
-                }
-
-                if(setup_stage == SetupStage::HostResource) {
-                    setup_stage = SetupStage::Attach1;
-                } else if(setup_stage == SetupStage::Attach1) {
-                    setup_stage = SetupStage::Attach;
-                } else {
-                    break;
-                }
-                if(setup_stage != SetupStage::Attach) {
-                    break;
-                }
-
-                process::manager->post_kernel_message_with_cli(MessageType::VirtIOGPUNewDevice);
-            } break;
-            case internal::Control::SetScanout:
-            case internal::Control::TransferToHost2D:
-            case internal::Control::ResourceFlush:
-                if(response->type != internal::Control::OkNodata) {
-                    logger(LogLevel::Error, "device operation %d failed %08x\n", request->type, response->type);
-                    break;
-                }
-                break;
-            default:
-                logger(LogLevel::Error, "unhandled response type %x\n", request->type);
-                break;
+            if(worker.done()) {
+                logger(LogLevel::Error, "virtio: gpu: worker stopped\n");
+                return Error::Code::VirtIOWorkerExit;
             }
             if(response->flags & internal::ControlHeader::flag_fence) {
                 sync_done = 1;
@@ -359,16 +386,19 @@ class GPUDevice {
         return std::unique_ptr<Framebuffer>(fb);
     }
 
-    GPUDevice()            = default;
-    GPUDevice(GPUDevice&&) = default;
+    GPUDevice(GPUDevice&) = delete;
+
     GPUDevice(queue::Queue control_queue, queue::Queue cursor_queue) : control_queue(std::move(control_queue)),
                                                                        cursor_queue(std::move(cursor_queue)) {
+        worker.start([this]() -> Worker::Generator {
+            return worker_main();
+        });
         internal::queue_data(this->control_queue, {internal::Control::GetDisplayInfo, 0, 0, 0});
         this->control_queue.notify_device();
     }
 };
 
-inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
+inline auto initialize(const ::pci::Device& device) -> Result<std::unique_ptr<GPUDevice>> {
     queue::Queue::buffer_size_check<internal::buffer_size_max>();
 
     auto cap_addr              = device.read_register(0x34) & 0xFFu;
@@ -451,6 +481,6 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
         return Error::Code::VirtIODeviceNotReady;
     }
 
-    return GPUDevice(std::move(control_queue), std::move(cursor_queue));
+    return std::unique_ptr<GPUDevice>(new GPUDevice(std::move(control_queue), std::move(cursor_queue)));
 }
 } // namespace virtio::gpu

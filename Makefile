@@ -7,10 +7,16 @@ INCLUDES     = $(addprefix -I, \
                    $(abspath edk2/MdePkg/Include) \
                    $(abspath edk2/MdePkg/Include/X64) \
                )
-COMMON_FLAGS = -O3 -masm=intel -Wall -Wfatal-errors --target=$(TARGET) \
+
+COMMON_FLAGS = -O3 -march=x86-64-v2 -masm=intel --target=$(TARGET) \
                -nostdlibinc -ffreestanding -mlong-double-64 \
-               -U__linux__ -D__ELF__ -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))'
-CXX = clang++ -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 -Wno-address-of-packed-member -march=x86-64-v2 $(INCLUDES) $(COMMON_FLAGS) -c
+               -U__linux__ -D__ELF__ -D_GNU_SOURCE -D_POSIX_TIMERS -DEFIAPI='__attribute__((ms_abi))' \
+			   -Wall -Wfatal-errors
+
+CXX = clang++ $(INCLUDES) $(COMMON_FLAGS) \
+	  -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 \
+	  -Wno-address-of-packed-member -Wno-deprecated-experimental-coroutine
+
 LIBRARY = $(BUILDENV)/lib
 
 ifndef BUILDENV
@@ -34,7 +40,7 @@ out/loader.efi: KleeLoaderPkg/main.c KleeLoaderPkg/elf.c KleeLoaderPkg/memory.c
 	cp edk2/Build/loader-X64/DEBUG_CLANGPDB/X64/loader.efi out
 
 out/stub.o: src/stub.cpp
-	${CXX} -o $@ $<
+	${CXX} -c -o $@ $<
 
 out/asmcode.o: src/asmcode.asm
 	nasm -f elf64 -o $@ $<
@@ -46,10 +52,10 @@ out/trampoline.o: src/smp/trampoline.asm
 	nasm -f elf64 -o $@ $<
 
 out/libc-support.o: src/libc-support.cpp
-	${CXX} -o $@ $<
+	${CXX} -c -o $@ $<
 
 out/main.o: src/main.cpp $(shell find src/ -type f -name '*.hpp') $(shell find src/ -type f -name '*.h')
-	${CXX} -o $@ $<
+	${CXX} -c -o $@ $<
 
 out/font.o: src/font.txt
 	mkdir -p out

@@ -320,7 +320,7 @@ class Kernel {
         auto virtio_gpu = std::unique_ptr<virtio::gpu::GPUDevice>();
         if(pci_devices.virtio_gpu != nullptr) {
             if(auto result = virtio::gpu::initialize(*pci_devices.virtio_gpu)) {
-                virtio_gpu.reset(new virtio::gpu::GPUDevice(std::move(result.as_value())));
+                virtio_gpu = std::move(result.as_value());
             } else {
                 logger(LogLevel::Error, "kernel: failed to initilize virtio gpu: %d", result.as_error());
             }

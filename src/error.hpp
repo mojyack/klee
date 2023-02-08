@@ -67,7 +67,13 @@ class [[nodiscard]] Error {
         // virtio
         VirtIOLegacyDevice,
         VirtIODeviceNotReady,
-        LastOfCode,
+        VirtIOOperationOutOfOrder,
+        VirtIODisplayInfo,
+        VirtIOCreateResource,
+        VirtIOAttachBacking,
+        VirtIOProcessEvent,
+        VirtIOUnknownEvent,
+        VirtIOWorkerExit,
         // elf
         NotELF,
         InvalidELF,
