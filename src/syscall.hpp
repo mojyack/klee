@@ -3,7 +3,7 @@
 #include "msr.hpp"
 #include "print.hpp"
 #include "process/manager.hpp"
-#include "segment.hpp"
+#include "segment/segment.hpp"
 
 namespace syscall {
 struct Result {

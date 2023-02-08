@@ -2,9 +2,11 @@
 #include <span>
 
 #include "../constants.hpp"
+#include "../error.hpp"
 #include "../interrupt/vector.hpp"
 #include "../log.hpp"
 #include "../message.hpp"
+#include "../panic.hpp"
 #include "../smp/ipi.hpp"
 #include "../util/spinlock.hpp"
 #include "process.hpp"

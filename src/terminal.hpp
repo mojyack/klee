@@ -424,20 +424,23 @@ class Shell {
             }
             const auto image_size = image_size_r.as_value();
 
-            const auto num_frames         = (image_size + bytes_per_frame - 1) / bytes_per_frame;
-            auto       code_frames_result = allocator->allocate(num_frames);
-            if(!code_frames_result) {
-                print("failed to allocate frames for code: %d\n", code_frames_result.as_error());
+            const auto num_frames = (image_size + memory::bytes_per_frame - 1) / memory::bytes_per_frame;
+
+            auto code_frames_r = memory::allocate(num_frames);
+            if(!code_frames_r) {
+                print("failed to allocate frames for code: %d\n", code_frames_r.as_error().as_int());
                 return true;
             }
-            auto code_frames = std::unique_ptr<SmartFrameID>(new SmartFrameID(std::move(code_frames_result.as_value())));
-            if(const auto read = handle.read(0, image_size, (*code_frames)->get_frame()); !read) {
+            auto& code_frames = code_frames_r.as_value();
+
+            auto code_pages = std::unique_ptr<memory::SmartFrameID>(new memory::SmartFrameID(std::move(code_frames)));
+            if(const auto read = handle.read(0, image_size, (*code_pages)->get_frame()); !read) {
                 print("file read error: %d\n", read.as_error().as_int());
                 return true;
             }
 
             const auto pid   = process::manager->create_process();
-            const auto tid_r = process::manager->create_thread(pid, process::elf_startup, reinterpret_cast<uint64_t>(code_frames.release()));
+            const auto tid_r = process::manager->create_thread(pid, process::elf_startup, reinterpret_cast<uint64_t>(code_pages.release()));
             if(!tid_r) {
                 print("failed to create new thread: %d\n", tid_r.as_error().as_int());
             } else {

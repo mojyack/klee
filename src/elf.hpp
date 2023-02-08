@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "arch/amd64/control-registers.hpp"
-#include "memory-manager.hpp"
+#include "memory/allocator.hpp"
 #include "paging.hpp"
 #include "process/manager.hpp"
 
@@ -49,14 +49,14 @@ struct ProgramHeader {
     }
 
 struct LoadedELF {
-    std::vector<SmartSingleFrameID> allocated_frames;
-    void*                           entry;
+    std::vector<memory::SmartSingleFrameID> allocated_frames;
+    void*                                   entry;
 };
 
-static_assert(paging::bytes_per_page == bytes_per_frame);
+static_assert(paging::bytes_per_page == memory::bytes_per_frame);
 
-inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdpt, process::Process* const process, const process::AutoLock& lock) -> Result<LoadedELF> {
-    const auto bytes_limit = image.get_frames() * bytes_per_frame;
+inline auto load_elf(memory::SmartFrameID& image, paging::PageDirectoryPointerTable& pdpt, process::Process* const process, const process::AutoLock& lock) -> Result<LoadedELF> {
+    const auto bytes_limit = image.get_frames() * memory::bytes_per_frame;
     const auto image_addr  = reinterpret_cast<uint8_t*>(image->get_frame());
 
     auto& elf = *reinterpret_cast<ELF*>(image_addr);
@@ -79,16 +79,17 @@ inline auto load_elf(SmartFrameID& image, paging::PageDirectoryPointerTable& pdp
     }
     segment_first = segment_first & 0xFFFF'FFFF'FFFF'F000;
 
-    const auto num_frames       = (segment_last - segment_first + bytes_per_frame - 1) / bytes_per_frame;
-    auto       allocated_frames = std::vector<SmartSingleFrameID>(num_frames);
+    const auto num_frames       = (segment_last - segment_first + memory::bytes_per_frame - 1) / memory::bytes_per_frame;
+    auto       allocated_frames = std::vector<memory::SmartSingleFrameID>(num_frames);
     for(auto i = 0; i < allocated_frames.size(); i += 1) {
-        auto& f = allocated_frames[i];
-
-        if(auto r = allocator->allocate_single(); !r) {
-            return r.as_error();
-        } else {
-            f = std::move(r.as_value());
+        auto frame_r = memory::allocate_single();
+        if(!frame_r) {
+            return frame_r.as_error();
         }
+        auto& frame = frame_r.as_value();
+
+        auto& f = allocated_frames[i];
+        f       = std::move(frame);
 
         const auto physical_addr = reinterpret_cast<uint64_t>(f->get_frame());
         const auto virtual_addr  = segment_first + paging::bytes_per_page * i;

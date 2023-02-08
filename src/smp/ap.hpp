@@ -2,7 +2,7 @@
 #include "../acpi.hpp"
 #include "../lapic/registers.hpp"
 #include "../log.hpp"
-#include "../memory-manager.hpp"
+#include "../memory/allocator.hpp"
 #include "ipi.hpp"
 #include "processor-resource.hpp"
 
@@ -91,15 +91,15 @@ inline auto send_init_start(const uint8_t target_lapic_id, const uintptr_t start
     send_command(200);
 }
 
-inline auto start_ap(const FrameID page, const uint8_t target_lapic_id, APEntry kernel_entry, const uint64_t kernel_stack, const APBootParameter* const boot_parameter) -> bool {
+inline auto start_ap(const memory::FrameID page, const uint8_t target_lapic_id, APEntry kernel_entry, const uint64_t kernel_stack, const APBootParameter* const boot_parameter) -> bool {
     if(std::bit_cast<uintptr_t>(page.get_frame()) > 0xFF000lu) {
         logger(LogLevel::Error, "smp: allocated page is not in a real-mode address space\n");
         return false;
     }
 
     const auto trampoline_size = &trampoline_end - &trampoline;
-    if(trampoline_size > bytes_per_frame) {
-        logger(LogLevel::Error, "smp: trampoline code is too big(%lu > %lu)\n", trampoline_size, bytes_per_frame);
+    if(trampoline_size > memory::bytes_per_frame) {
+        logger(LogLevel::Error, "smp: trampoline code is too big(%lu > %lu)\n", trampoline_size, memory::bytes_per_frame);
         return false;
     }
 

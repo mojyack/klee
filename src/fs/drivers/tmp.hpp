@@ -3,7 +3,7 @@
 #include <variant>
 #include <vector>
 
-#include "../../memory-manager.hpp"
+#include "../../memory/allocator.hpp"
 #include "../fs.hpp"
 
 namespace fs::tmp {
@@ -28,8 +28,8 @@ concept FileObject = std::is_same_v<T, File> || std::is_same_v<T, Directory>;
 
 class File : public Object {
   private:
-    size_t                          filesize = 0;
-    std::vector<SmartSingleFrameID> data;
+    size_t                                  filesize = 0;
+    std::vector<memory::SmartSingleFrameID> data;
 
     auto data_at(const size_t index) -> uint8_t* {
         return static_cast<uint8_t*>(data[index]->get_frame());
@@ -52,11 +52,11 @@ class File : public Object {
             return Error::Code::EndOfFile;
         }
 
-        auto frame_index = offset / bytes_per_frame;
+        auto frame_index = offset / memory::bytes_per_frame;
 
         {
-            const auto offset_in_frame = offset % bytes_per_frame;
-            const auto size_in_frame   = bytes_per_frame - offset_in_frame;
+            const auto offset_in_frame = offset % memory::bytes_per_frame;
+            const auto size_in_frame   = memory::bytes_per_frame - offset_in_frame;
             const auto copy_len        = size < size_in_frame ? size : size_in_frame;
             memory_copy<write>(buffer, data_at(frame_index) + offset_in_frame, copy_len);
             buffer += copy_len;
@@ -64,10 +64,10 @@ class File : public Object {
             frame_index += 1;
         }
 
-        while(size >= bytes_per_frame) {
-            memory_copy<write>(buffer, data_at(frame_index), bytes_per_frame);
-            buffer += bytes_per_frame;
-            size -= bytes_per_frame;
+        while(size >= memory::bytes_per_frame) {
+            memory_copy<write>(buffer, data_at(frame_index), memory::bytes_per_frame);
+            buffer += memory::bytes_per_frame;
+            size -= memory::bytes_per_frame;
             frame_index += 1;
         }
 
@@ -88,16 +88,18 @@ class File : public Object {
     }
 
     auto resize(const size_t new_size) -> Error {
-        const auto new_data_size = (new_size + bytes_per_frame - 1) / bytes_per_frame;
+        const auto new_data_size = (new_size + memory::bytes_per_frame - 1) / memory::bytes_per_frame;
         const auto old_data_size = data.size();
         if(new_data_size > old_data_size) {
-            auto new_frames = std::vector<SmartSingleFrameID>(new_data_size - old_data_size);
+            auto new_frames = std::vector<memory::SmartSingleFrameID>(new_data_size - old_data_size);
             for(auto& f : new_frames) {
-                if(auto r = allocator->allocate_single(); !r) {
-                    return r.as_error();
-                } else {
-                    f = std::move(r.as_value());
+                auto frame_r = memory::allocate_single();
+                if(!frame_r) {
+                    return frame_r.as_error();
                 }
+                auto& frame = frame_r.as_value();
+
+                f = std::move(frame);
             }
             data.reserve(new_data_size);
             std::move(std::begin(new_frames), std::end(new_frames), std::back_inserter(data));
@@ -175,12 +177,22 @@ class Driver : public fs::Driver {
 
   public:
     auto read(OpenInfo& info, const size_t offset, const size_t size, void* const buffer) -> Result<size_t> override {
-        value_or(file, data_as<File>(info.get_driver_data()));
+        auto file_r = data_as<File>(info.get_driver_data());
+        if(!file_r) {
+            return file_r.as_error();
+        }
+        auto& file = file_r.as_value();
+
         return file->read(offset, size, static_cast<uint8_t*>(buffer));
     }
 
     auto write(OpenInfo& info, const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> override {
-        value_or(file, data_as<File>(info.get_driver_data()));
+        auto file_r = data_as<File>(info.get_driver_data());
+        if(!file_r) {
+            return file_r.as_error();
+        }
+        auto& file = file_r.as_value();
+
         if(const auto e = file->resize(offset + size)) {
             return e;
         }
@@ -188,13 +200,23 @@ class Driver : public fs::Driver {
     }
 
     auto find(OpenInfo& info, const std::string_view name) -> Result<OpenInfo> override {
-        value_or(dir, data_as<Directory>(info.get_driver_data()));
+        auto dir_r = data_as<Directory>(info.get_driver_data());
+        if(!dir_r) {
+            return dir_r.as_error();
+        }
+        auto& dir = dir_r.as_value();
+
         const auto p = dir->find(name);
         return p != nullptr ? Result(create_openinfo(*p)) : Error::Code::NoSuchFile;
     }
 
     auto create(OpenInfo& info, const std::string_view name, const FileType type) -> Result<OpenInfo> override {
-        value_or(dir, data_as<Directory>(info.get_driver_data()));
+        auto dir_r = data_as<Directory>(info.get_driver_data());
+        if(!dir_r) {
+            return dir_r.as_error();
+        }
+        auto& dir = dir_r.as_value();
+
         if(dir->find(name) != nullptr) {
             return Error::Code::FileExists;
         }
@@ -214,13 +236,28 @@ class Driver : public fs::Driver {
     }
 
     auto readdir(OpenInfo& info, const size_t index) -> Result<OpenInfo> override {
-        value_or(dir, data_as<Directory>(info.get_driver_data()));
-        value_or(child, dir->find_nth(index));
+        auto dir_r = data_as<Directory>(info.get_driver_data());
+        if(!dir_r) {
+            return dir_r.as_error();
+        }
+        auto& dir = dir_r.as_value();
+
+        auto child_r = dir->find_nth(index);
+        if(!child_r) {
+            return child_r.as_error();
+        }
+        auto& child = child_r.as_value();
+
         return create_openinfo(*child);
     }
 
     auto remove(OpenInfo& info, const std::string_view name) -> Error override {
-        value_or(dir, data_as<Directory>(info.get_driver_data()));
+        auto dir_r = data_as<Directory>(info.get_driver_data());
+        if(!dir_r) {
+            return dir_r.as_error();
+        }
+        auto& dir = dir_r.as_value();
+
         if(!dir->remove(name)) {
             return Error::Code::NoSuchFile;
         }

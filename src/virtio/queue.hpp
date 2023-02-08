@@ -3,7 +3,7 @@
 #include <memory>
 
 #include "../log.hpp"
-#include "../memory-manager.hpp"
+#include "../memory/allocator.hpp"
 
 namespace virtio::queue {
 struct Descriptor {
@@ -76,7 +76,7 @@ class Queue {
     volatile uint16_t* queue_select;
     uint16_t*          notify_address;
 
-    SmartFrameID frame_id;
+    memory::SmartFrameID frame_id;
 
     auto barrier() -> void {
         asm volatile(""
@@ -88,7 +88,7 @@ class Queue {
   public:
     template <size_t buffer_size_max>
     static constexpr auto buffer_size_check() -> void {
-        static_assert(buffer_size_max <= bytes_per_frame, "buffer size is larger than frame size");
+        static_assert(buffer_size_max <= memory::bytes_per_frame, "buffer size is larger than frame size");
     }
 
     auto get_next_descriptor_buffer(const size_t len) -> void* {
@@ -108,7 +108,7 @@ class Queue {
             descriptors.get()[(descriptor_index) % size].flags      = Descriptor::next;
             descriptors.get()[(descriptor_index) % size].next_index = (descriptor_index + 1) % size;
             descriptors.get()[(descriptor_index + 1) % size].flags  = Descriptor::write;
-            descriptors.get()[(descriptor_index + 1) % size].len    = bytes_per_frame;
+            descriptors.get()[(descriptor_index + 1) % size].len    = memory::bytes_per_frame;
             avail.index += 1;
         }
 
@@ -133,7 +133,7 @@ class Queue {
         *result  = nullptr;
         if(e.len == 0) {
             return true;
-        } else if(e.len > bytes_per_frame) {
+        } else if(e.len > memory::bytes_per_frame) {
             logger(LogLevel::Error, "chained descriptor is not supported");
             return true;
         } else {
@@ -168,7 +168,7 @@ class Queue {
                                                                                                                                      queue_number(queue_number),
                                                                                                                                      queue_select(queue_select),
                                                                                                                                      notify_address(notify_address) {
-        if(auto r = allocator->allocate(size); !r) {
+        if(auto r = memory::allocate(size); !r) {
             logger(LogLevel::Error, "virtio: failed to allocate frames for virtio device: %d\n", r.as_error());
             return;
         } else {
@@ -178,7 +178,7 @@ class Queue {
         for(auto i = size_t(0); i < size; i += 1) {
             auto& d      = descriptors.get()[i];
             d.addr       = reinterpret_cast<uint64_t>((*frame_id + i).get_frame());
-            d.len        = bytes_per_frame;
+            d.len        = memory::bytes_per_frame;
             d.flags      = 0;
             d.next_index = (i + 1 != size) ? i + 1 : 0;
         }

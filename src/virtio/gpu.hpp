@@ -181,7 +181,7 @@ auto queue_data(queue::Queue& queue, ControlHeader&& header, Payload&& payload) 
 
 class Framebuffer : public fs::dev::FramebufferDevice {
   private:
-    std::array<FrameID, 2> buffers;
+    std::array<memory::FrameID, 2> buffers;
     queue::Queue*          control_queue;
     uint32_t*              sync_done;
     bool                   flip = false;
@@ -211,7 +211,7 @@ class Framebuffer : public fs::dev::FramebufferDevice {
 
     auto operator=(Framebuffer&&) -> Framebuffer& = delete;
 
-    Framebuffer(const std::array<FrameID, 2> buffers, const std::array<size_t, 2> buffer_size, queue::Queue& control_queue, uint32_t* const sync_done, Event**& sync_done_event) : buffers(buffers),
+    Framebuffer(const std::array<memory::FrameID, 2> buffers, const std::array<size_t, 2> buffer_size, queue::Queue& control_queue, uint32_t* const sync_done, Event**& sync_done_event) : buffers(buffers),
                                                                                                                                                                                    control_queue(&control_queue),
                                                                                                                                                                                    sync_done(sync_done) {
         data              = static_cast<uint8_t*>(buffers[flip].get_frame());
@@ -237,7 +237,7 @@ class GPUDevice {
     SetupStage setup_stage = SetupStage::Init;
 
     std::array<uint32_t, 2>                          display_size = {1024, 768};
-    std::pair<std::array<SmartFrameID, 2>, uint64_t> framebuffer;
+    std::pair<std::array<memory::SmartFrameID, 2>, uint64_t> framebuffer;
     uint32_t                                         sync_done       = 1;
     Event**                                          sync_done_event = nullptr;
 
@@ -295,8 +295,8 @@ class GPUDevice {
 
                 const auto resource_id = reinterpret_cast<internal::ResourceCreate2DRequest*>(request_data)->resource_id;
                 const auto fb_bytes    = display_size[0] * display_size[1] * 4;
-                const auto fb_frames   = (fb_bytes + bytes_per_frame - 1) / bytes_per_frame;
-                if(auto r = allocator->allocate(fb_frames); !r) {
+                const auto fb_frames   = (fb_bytes + memory::bytes_per_frame - 1) / memory::bytes_per_frame;
+                if(auto r = memory::allocate(fb_frames); !r) {
                     logger(LogLevel::Error, "virtio: gpu: failed to get allocate framebuffer %d\n", r.as_error());
                 } else {
                     framebuffer.first[resource_id - 1] = std::move(r.as_value());

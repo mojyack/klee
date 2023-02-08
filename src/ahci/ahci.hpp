@@ -3,7 +3,6 @@
 
 #include "../interrupt/vector.hpp"
 #include "../log.hpp"
-#include "../memory-manager.hpp"
 #include "../mutex.hpp"
 #include "../pci.hpp"
 #include "ata.hpp"

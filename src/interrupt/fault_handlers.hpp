@@ -2,7 +2,7 @@
 #include "../debug.hpp"
 #include "../log.hpp"
 #include "../process/manager.hpp"
-#include "../segment.hpp"
+#include "../segment/segment.hpp"
 #include "type.hpp"
 
 namespace interrupt {

@@ -1,11 +1,9 @@
 #pragma once
 #include <array>
 
-#include "asmcode.hpp"
-#include "interrupt/type.hpp"
-#include "macro.hpp"
-#include "memory-manager.hpp"
-#include "x86-descriptor.hpp"
+#include "../asmcode.hpp"
+#include "../interrupt/type.hpp"
+#include "../x86-descriptor.hpp"
 
 namespace segment {
 union SegmentDescriptor {
@@ -74,18 +72,6 @@ union SegmentSelector {
     } bits __attribute__((packed));
 } __attribute__((packed));
 
-struct TaskStateSegment {
-    uint32_t reserved1;
-    uint64_t rsp0;
-    uint64_t rsp1;
-    uint64_t rsp2;
-    uint64_t reserved2;
-    uint64_t ist[7];
-    uint64_t reserved3;
-    uint16_t reserved4;
-    uint16_t iopb;
-} __attribute__((packed));
-
 using GDT = std::array<SegmentDescriptor, 7>;
 
 enum SegmentNumber : uint16_t {
@@ -114,41 +100,5 @@ inline auto apply_segments(GDT& gdt) -> void {
     load_gdt(sizeof(GDT) - 1, reinterpret_cast<uintptr_t>(gdt.data()));
     set_dsall(kernel_ds.data);
     set_csss(kernel_cs.data, kernel_ss.data);
-}
-
-struct TSSResource {
-    std::unique_ptr<TaskStateSegment> tss;
-    SmartSingleFrameID                rsp_stack;
-    SmartSingleFrameID                rst_stack;
-};
-
-inline auto setup_tss(GDT& gdt) -> Result<TSSResource> {
-    auto rsp_stack = SmartSingleFrameID();
-    if(auto r = allocator->allocate_single(); !r) {
-        return r.as_error();
-    } else {
-        rsp_stack = std::move(r.as_value());
-    }
-
-    auto rst_stack = SmartSingleFrameID();
-    if(auto r = allocator->allocate_single(); !r) {
-        return r.as_error();
-    } else {
-        rst_stack = std::move(r.as_value());
-    }
-
-    auto tss = std::unique_ptr<TaskStateSegment>(new(std::nothrow) TaskStateSegment);
-    if(!tss) {
-        return Error::Code::NoEnoughMemory;
-    }
-
-    tss->rsp0                                    = std::bit_cast<uint64_t>(static_cast<std::byte*>(rsp_stack->get_frame()) + bytes_per_frame);
-    tss->ist[interrupt::ist_for_lapic_timer - 1] = std::bit_cast<uint64_t>(static_cast<std::byte*>(rst_stack->get_frame()) + bytes_per_frame);
-
-    const auto tss_addr = reinterpret_cast<uint64_t>(tss.get());
-    gdt[TSSLow].set_system_segment(DescriptorType::TSSAvailable, 0, tss_addr & 0xFFFFFFFFu, sizeof(tss) - 1);
-    gdt[TSSHigh].data = tss_addr >> 32;
-    load_tr(SegmentSelector{.bits = {0, 0, TSSLow}}.data);
-    return TSSResource{std::move(tss), std::move(rsp_stack), std::move(rst_stack)};
 }
 } // namespace segment

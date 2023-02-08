@@ -6,11 +6,11 @@
 #include "interrupt/interrupt.hpp"
 #include "keyboard.hpp"
 #include "lapic/timer.hpp"
-#include "memory-map.h"
+#include "memory/memory-map.h"
 #include "mouse.hpp"
 #include "paging.hpp"
 #include "panic.hpp"
-#include "segment.hpp"
+#include "segment/tss.hpp"
 #include "smp/ap.hpp"
 #include "smp/id.hpp"
 #include "syscall.hpp"
@@ -21,11 +21,11 @@
 
 class Kernel {
   private:
-    smp::ProcessorResource processor_resource;
-    segment::TSSResource   tss_resource;
-    BitmapMemoryManager    memory_manager;
-    FramebufferConfig      framebuffer_config;
-    acpi::RSDP&            rsdp;
+    smp::ProcessorResource      processor_resource;
+    segment::TSSResource        tss_resource;
+    memory::BitmapMemoryManager memory_manager;
+    FramebufferConfig           framebuffer_config;
+    acpi::RSDP&                 rsdp;
 
     std::vector<std::unique_ptr<smp::ProcessorResource>> processor_resources; // for aps
 
@@ -153,14 +153,14 @@ class Kernel {
         }
     }
 
-    auto boot_ap(const FrameID trampoline_page, const uint8_t lapic_id) -> Error {
+    auto boot_ap(const memory::FrameID trampoline_page, const uint8_t lapic_id) -> Error {
         constexpr auto n_stack_frames = 1;
 
         auto resource = processor_resources.emplace_back(new(std::nothrow) smp::ProcessorResource).get();
         if(!resource) {
             return Error::Code::NoEnoughMemory;
         }
-        if(auto r = allocator->allocate(n_stack_frames); !r) {
+        if(auto r = memory::allocate(n_stack_frames); !r) {
             return r.as_error();
         } else {
             resource->stack = std::move(r.as_value());
@@ -170,7 +170,7 @@ class Kernel {
         paging::create_identity_page_table(resource->pml4_table);
 
         const auto boot_parameter = smp::APBootParameter{.processor_resource = resource, .notify = 0};
-        const auto stack_ptr      = std::bit_cast<uint64_t>(resource->stack->get_frame()) + bytes_per_frame * n_stack_frames;
+        const auto stack_ptr      = std::bit_cast<uint64_t>(resource->stack->get_frame()) + memory::bytes_per_frame * n_stack_frames;
         smp::start_ap(trampoline_page, lapic_id, &ap_main, stack_ptr, &boot_parameter);
         processor_resources.emplace_back(std::move(resource));
 
@@ -180,7 +180,7 @@ class Kernel {
         return Success();
     }
 
-    auto boot_aps(const FrameID trampoline_page) -> Error {
+    auto boot_aps(const memory::FrameID trampoline_page) -> Error {
         const auto bsp_id = lapic::read_lapic_id();
         const auto ids    = acpi::detect_cores().lapic_ids;
 
@@ -224,8 +224,8 @@ class Kernel {
         paging::create_identity_page_table(processor_resource.pml4_table);
         paging::apply_pml4_table(processor_resource.pml4_table);
         // - allocate lowest page for ap startup
-        auto kernel_heap        = SmartFrameID();
-        auto ap_trampoline_page = SmartSingleFrameID();
+        auto kernel_heap        = memory::SmartFrameID();
+        auto ap_trampoline_page = memory::SmartSingleFrameID();
         {
             auto r = memory_manager.allocate_single();          // this allocate must be performed before heap initialize
             if(auto r = memory_manager.initialize_heap(); !r) { // initialize heap here for printk
@@ -239,7 +239,9 @@ class Kernel {
                 ap_trampoline_page = std::move(r.as_value());
             }
         }
-        allocator = &memory_manager;
+
+        auto critical_allocator    = Critical<memory::BitmapMemoryManager*>(&memory_manager);
+        memory::critical_allocator = &critical_allocator;
 
         // create debug output
         // TODO

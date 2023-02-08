@@ -168,7 +168,9 @@ class BlockDevice : public Device {
             const auto offset_in_sector = offset % bytes_per_sector;
             const auto size_in_sector   = bytes_per_sector - offset_in_sector;
             const auto copy_len         = std::min(size, size_in_sector);
-            error_or(read_sector(sector, 1, read_buffer.data()));
+            if(const auto e = read_sector(sector, 1, read_buffer.data())) {
+                return e;
+            }
             memcpy(buffer, read_buffer.data() + offset_in_sector, copy_len);
             buffer += copy_len;
             size -= copy_len;
@@ -177,14 +179,18 @@ class BlockDevice : public Device {
 
         if(size != 0) {
             const auto count = size / bytes_per_sector;
-            error_or(read_sector(sector, count, buffer));
+            if(const auto e = read_sector(sector, count, buffer)) {
+                return e;
+            }
             buffer += bytes_per_sector * count;
             size -= bytes_per_sector * count;
             sector += count;
         }
 
         if(size != 0) {
-            error_or(read_sector(sector, 1, read_buffer.data()));
+            if(const auto e = read_sector(sector, 1, read_buffer.data())) {
+                return e;
+            }
             memcpy(buffer, read_buffer.data(), size);
         }
 
@@ -207,12 +213,16 @@ class BlockDevice : public Device {
         auto sector_buffer = std::vector<uint8_t>(bytes_per_sector);
 
         {
-            error_or(read_sector(sector, 1, sector_buffer.data()));
+            if(const auto e = read_sector(sector, 1, sector_buffer.data())) {
+                return e;
+            }
             const auto offset_in_sector = offset % bytes_per_sector;
             const auto size_in_sector   = bytes_per_sector - offset_in_sector;
             const auto copy_len         = std::min(size, size_in_sector);
             memcpy(sector_buffer.data() + offset_in_sector, buffer, copy_len);
-            error_or(write_sector(sector, 1, sector_buffer.data()));
+            if(const auto e = write_sector(sector, 1, sector_buffer.data())) {
+                return e;
+            }
             buffer += copy_len;
             size -= copy_len;
             sector += 1;
@@ -220,16 +230,22 @@ class BlockDevice : public Device {
 
         if(size != 0) {
             const auto count = size / bytes_per_sector;
-            error_or(write_sector(sector, count, buffer));
+            if(const auto e = write_sector(sector, count, buffer)) {
+                return e;
+            }
             buffer += bytes_per_sector * count;
             size -= bytes_per_sector * count;
             sector += count;
         }
 
         if(size != 0) {
-            error_or(read_sector(sector, 1, sector_buffer.data()));
+            if(const auto e = read_sector(sector, 1, sector_buffer.data())) {
+                return e;
+            }
             memcpy(sector_buffer.data(), buffer, size);
-            error_or(write_sector(sector, 1, sector_buffer.data()));
+            if(const auto e = write_sector(sector, 1, sector_buffer.data())) {
+                return e;
+            }
         }
 
         return size_t(total_size);

@@ -2,138 +2,14 @@
 #include <array>
 #include <limits>
 
-#include "error.hpp"
-#include "libc-support.hpp"
-#include "memory-map.h"
-#include "panic.hpp"
+#include "../error.hpp"
+#include "../libc-support.hpp"
+#include "../mutex.hpp"
+#include "../panic.hpp"
+#include "frame.hpp"
+#include "memory-type.hpp"
 
-#define MM_DEBUG_PRINT 0
-#if MM_DEBUG_PRINT == 1
-#include "framebuffer.hpp"
-#endif
-
-constexpr auto operator""_KiB(const unsigned long long kib) -> unsigned long long {
-    return kib * 1024;
-}
-
-constexpr auto operator""_MiB(const unsigned long long mib) -> unsigned long long {
-    return mib * 1024_KiB;
-}
-
-constexpr auto operator""_GiB(const unsigned long long gib) -> unsigned long long {
-    return gib * 1024_MiB;
-}
-
-static constexpr auto bytes_per_frame = 4_KiB;
-
-class FrameID {
-  private:
-    size_t id;
-
-  public:
-    auto get_id() const -> size_t {
-        return id;
-    }
-
-    auto get_frame() const -> void* {
-        return reinterpret_cast<void*>(id * bytes_per_frame);
-    }
-
-    auto operator+(const size_t value) const -> FrameID {
-        return FrameID(id + value);
-    }
-
-    auto operator!=(const FrameID& o) const -> bool {
-        return id != o.id;
-    }
-
-    explicit FrameID(const size_t id) : id(id) {}
-};
-
-inline auto nullframe = FrameID(std::numeric_limits<size_t>::max());
-
-class SmartFrameID {
-  private:
-    FrameID id = nullframe;
-    size_t  frames;
-
-  public:
-    auto free() -> void;
-
-    auto get_frames() const -> size_t {
-        return frames;
-    }
-
-    auto operator=(SmartFrameID&& o) -> SmartFrameID& {
-        free();
-        std::swap(id, o.id);
-        frames = o.frames;
-        return *this;
-    }
-
-    auto operator->() -> FrameID* {
-        return &id;
-    }
-
-    auto operator*() -> FrameID {
-        return id;
-    }
-
-    operator bool() const {
-        return id != nullframe;
-    }
-
-    SmartFrameID(SmartFrameID&& o) {
-        *this = std::move(o);
-    }
-
-    SmartFrameID() = default;
-
-    SmartFrameID(const FrameID id, const size_t frames) : id(id), frames(frames) {}
-
-    ~SmartFrameID() {
-        free();
-    }
-};
-
-class SmartSingleFrameID {
-  private:
-    FrameID id = nullframe;
-
-  public:
-    auto free() -> void;
-
-    auto operator=(SmartSingleFrameID&& o) -> SmartSingleFrameID& {
-        free();
-        std::swap(id, o.id);
-        return *this;
-    }
-
-    auto operator->() -> FrameID* {
-        return &id;
-    }
-
-    auto operator*() -> FrameID {
-        return id;
-    }
-
-    operator bool() const {
-        return id != nullframe;
-    }
-
-    SmartSingleFrameID(SmartSingleFrameID&& o) {
-        *this = std::move(o);
-    }
-
-    SmartSingleFrameID() = default;
-
-    SmartSingleFrameID(const FrameID id) : id(id) {}
-
-    ~SmartSingleFrameID() {
-        free();
-    }
-};
-
+namespace memory {
 class BitmapMemoryManager {
   private:
     using MaplineType = uint64_t;
@@ -234,21 +110,6 @@ class BitmapMemoryManager {
         return std::move(heap_start);
     }
 
-#if MM_DEBUG_PRINT == 1
-    auto print_bitmap(const FramebufferConfig& config, const Rectangle rect, const int size) -> void {
-        auto fb = Framebuffer<PixelBGRResv8BitPerColor>(config);
-        for(auto y = rect.a.y; y - rect.a.y < rect.width() && y < config.vertical_resolution; y += size) {
-            for(auto x = rect.a.x; x - rect.a.x < rect.width() && x < config.horizontal_resolution; x += size) {
-                const auto frame = FrameID(range_begin.get_id() + (y / size) * rect.width() + (x / size));
-                if(frame.get_id() >= range_end.get_id()) {
-                    return;
-                }
-                fb.write_rect({x, y}, {x + size, y + size}, static_cast<uint8_t>(get_bit(frame) ? 0x40 : 0xFF));
-            }
-        }
-    }
-#endif
-
     BitmapMemoryManager(const MemoryMap& memory_map) {
         const auto memory_map_base = reinterpret_cast<uintptr_t>(memory_map.buffer);
         auto       available_end   = uintptr_t(0);
@@ -269,12 +130,21 @@ class BitmapMemoryManager {
     }
 };
 
-#undef MM_DEBUG_PRINT
+inline auto critical_allocator = (Critical<BitmapMemoryManager*>*)(nullptr);
 
-inline auto allocator = (BitmapMemoryManager*)(nullptr);
+inline auto allocate(const size_t frames) -> Result<SmartFrameID> {
+    auto [lock, allocator] = critical_allocator->access();
+    return allocator->allocate(frames);
+}
+
+inline auto allocate_single() -> Result<SmartSingleFrameID> {
+    auto [lock, allocator] = critical_allocator->access();
+    return allocator->allocate_single();
+}
 
 inline auto SmartFrameID::free() -> void {
     if(id != nullframe) {
+        auto [lock, allocator] = critical_allocator->access();
         fatal_assert(!allocator->deallocate(id, frames), "failed to deallocate memory");
         id = nullframe;
     }
@@ -282,7 +152,9 @@ inline auto SmartFrameID::free() -> void {
 
 inline auto SmartSingleFrameID::free() -> void {
     if(id != nullframe) {
+        auto [lock, allocator] = critical_allocator->access();
         fatal_assert(!allocator->deallocate(id, 1), "failed to deallocate memory");
         id = nullframe;
     }
 }
+} // namespace memory

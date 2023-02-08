@@ -3,10 +3,10 @@
 #include <vector>
 
 #include "../arch/amd64/control-registers.hpp"
-#include "../memory-manager.hpp"
+#include "../memory/frame.hpp"
 #include "../message.hpp"
 #include "../paging.hpp"
-#include "../segment.hpp"
+#include "../segment/segment.hpp"
 #include "../smp/id.hpp"
 #include "../util/container-of.hpp"
 #include "../util/dense-map.hpp"
@@ -21,8 +21,8 @@ struct alignas(16) ThreadContext {
 } __attribute__((packed));
 
 struct PageMap {
-    paging::PageDirectoryPointerTable upper_page_map; // 0xFFFF800000000000 ~ 0xFFFF807FFFFFFFFF
-    std::vector<SmartSingleFrameID>   allocated_frames;
+    paging::PageDirectoryPointerTable       upper_page_map; // 0xFFFF800000000000 ~ 0xFFFF807FFFFFFFFF
+    std::vector<memory::SmartSingleFrameID> allocated_frames;
 };
 
 using ThreadEntry = void(uint64_t data, int64_t id);
