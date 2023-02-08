@@ -12,24 +12,31 @@ constexpr auto open_wo = OpenMode{.read = false, .write = true};
 constexpr auto open_rw = OpenMode{.read = true, .write = true};
 
 inline auto follow_mountpoints(fs::OpenInfo* info) -> fs::OpenInfo* {
-    while(info->mount != nullptr) {
-        info = info->mount;
+    while(true) {
+        const auto mount = info->mount;
+        if(mount != nullptr) {
+            info = mount;
+        } else {
+            break;
+        }
     }
     return info;
 }
 
 inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
+    auto [lock, counts] = info->critical_counts.access();
+
     if(mode.read) {
         switch(info->attributes.read_level) {
         case OpenLevel::Block:
             return Error::Code::InvalidOpenMode;
         case OpenLevel::Single:
-            if(info->read_count != 0) {
+            if(counts.read_count != 0) {
                 return Error::Code::FileOpened;
             }
             [[fallthrough]];
         case OpenLevel::Multi:
-            if(info->attributes.exclusive && info->write_count != 0) {
+            if(info->attributes.exclusive && counts.write_count != 0) {
                 return Error::Code::FileOpened;
             }
             break;
@@ -40,12 +47,12 @@ inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
         case OpenLevel::Block:
             return Error::Code::InvalidOpenMode;
         case OpenLevel::Single:
-            if(info->write_count != 0) {
+            if(counts.write_count != 0) {
                 return Error::Code::FileOpened;
             }
             [[fallthrough]];
         case OpenLevel::Multi:
-            if(info->attributes.exclusive && info->read_count != 0) {
+            if(info->attributes.exclusive && counts.read_count != 0) {
                 return Error::Code::FileOpened;
             }
             break;
@@ -53,10 +60,10 @@ inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
     }
 
     if(mode.read) {
-        info->read_count += 1;
+        counts.read_count += 1;
     }
     if(mode.write) {
-        info->write_count += 1;
+        counts.write_count += 1;
     }
 
     return Success();
@@ -66,9 +73,10 @@ class Handle {
     friend class Manager;
 
   private:
-    OpenInfo*              data = nullptr;
+    OpenInfo*              data;
     OpenMode               mode;
     std::unique_ptr<Event> write_event; // data available
+    std::atomic_bool       expired = true;
 
   public:
     auto read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> {
@@ -92,24 +100,28 @@ class Handle {
             return Error::Code::FileNotOpened;
         }
 
-        auto& children     = data->children;
-        auto  created_info = std::optional<OpenInfo>();
-        auto  result       = (OpenInfo*)(nullptr);
-        if(const auto p = children.find(std::string(name)); p != children.end()) {
-            result = follow_mountpoints(&p->second);
-        } else {
-            auto find_result = data->find(name);
-            if(!find_result) {
-                return find_result.as_error();
+        auto created_info = std::optional<OpenInfo>();
+        auto result       = (OpenInfo*)(nullptr);
+        {
+            auto [lock, children] = data->critical_children.access();
+            if(const auto p = children.find(std::string(name)); p != children.end()) {
+                result = follow_mountpoints(&p->second);
+            } else {
+                auto find_result = data->find(name);
+                if(!find_result) {
+                    return find_result.as_error();
+                }
+                result = &created_info.emplace(std::move(find_result.as_value()));
             }
-            result = &created_info.emplace(std::move(find_result.as_value()));
-        }
 
-        if(const auto e = try_open(result, open_mode)) {
-            return e;
+            if(const auto e = try_open(result, open_mode)) {
+                return e;
+            }
         }
 
         if(created_info) {
+            auto [lock, children] = data->critical_children.access();
+
             auto& v = created_info.value();
             result  = &children.emplace(v.name, std::move(v)).first->second;
         }
@@ -189,19 +201,21 @@ class Handle {
 
     auto operator=(Handle&& o) -> Handle& {
         close();
-        std::swap(data, o.data);
+        data = o.data;
         mode = o.mode;
         std::swap(write_event, o.write_event);
+        expired = o.expired.exchange(true);
         return *this;
     }
 
-    Handle() = default;
+    Handle() : expired(true) {
+    }
 
     Handle(Handle&& o) {
         *this = std::move(o);
     }
 
-    Handle(OpenInfo* const data, const OpenMode mode) : data(data), mode(mode) {
+    Handle(OpenInfo* const data, const OpenMode mode) : data(data), mode(mode), expired(false) {
         write_event.reset(new Event());
         data->on_handle_create(*write_event);
     }

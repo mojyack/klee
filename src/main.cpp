@@ -253,20 +253,16 @@ class Kernel {
         process::manager = &pm;
 
         // create filesystem mananger
-        auto fs_manager = Critical<fs::Manager>();
-        fs::critical_manager     = &fs_manager;
+        fs::manager = new fs::Manager();
 
         // - mount "/dev"
-        {
-            auto& manager = fs::critical_manager->unsafe_access(); // no other threads exist here
-            if(const auto e = manager.mount("devfs", "/dev")) {
-                fatal_error("failed to mount \"/dev\": ", e.as_int());
-            }
+        if(const auto e = fs::manager->mount("devfs", "/dev")) {
+            fatal_error("failed to mount \"/dev\": ", e.as_int());
         }
 
         // create uefi framebuffer
         auto gop_framebuffer = devfs::GOPFrameBuffer(framebuffer_config);
-        if(fs::critical_manager->unsafe_access().create_device_file("fb-uefi0", &gop_framebuffer)) {
+        if(fs::manager->create_device_file("fb-uefi0", &gop_framebuffer)) {
             fatal_error("failed to create uefi framebuffer");
         }
 
@@ -308,7 +304,7 @@ class Kernel {
 
         // --- connect usb devices
         if(usb_keyboard) {
-            if(const auto e = fs::critical_manager->unsafe_access().create_device_file("keyboard-usb0", usb_keyboard.get())) {
+            if(const auto e = fs::manager->create_device_file("keyboard-usb0", usb_keyboard.get())) {
                 logger(LogLevel::Error, "kernel: failed to create keyboard device file: %d\n", e.as_int());
             } else {
                 keyboard::setup(*usb_keyboard.get());
@@ -373,7 +369,7 @@ class Kernel {
         logger(LogLevel::Info, "kernel: initialize done\n");
 
         // thread test
-        if(0){
+        if(0) {
             struct Main {
                 static auto main(uint64_t id, int64_t data) -> void {
                 loop:
@@ -417,7 +413,7 @@ class Kernel {
                 break;
             case MessageType::VirtIOGPUNewDevice: {
                 virtio_gpu_framebuffer = virtio_gpu->create_devfs_framebuffer();
-                if(const auto e = fs::critical_manager->access().second.create_device_file("fb-virtio0", virtio_gpu_framebuffer.get())) {
+                if(const auto e = fs::manager->create_device_file("fb-virtio0", virtio_gpu_framebuffer.get())) {
                     logger(LogLevel::Error, "kernel: failed to create virtio gpu device file: %d\n", e.as_int());
                 }
                 terminal_fb_dev = "/dev/fb-virtio0";

@@ -688,6 +688,7 @@ class Manager {
             goto loop;
         }
     }
+
     auto switch_thread_may_fail(ThreadContext& current_context) -> void {
         const auto lapic_id = lapic::read_lapic_id();
         if(lapic_id == smp::first_lapic_id) {

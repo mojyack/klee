@@ -56,8 +56,11 @@ class Driver {
         return Error::Code::NotImplemented;
     }
 
-    virtual auto on_handle_create(OpenInfo& info, Event& write_event) -> void {}
-    virtual auto on_handle_destroy(OpenInfo& info) -> void {}
+    virtual auto on_handle_create(OpenInfo& info, Event& write_event) -> void {
+    }
+
+    virtual auto on_handle_destroy(OpenInfo& info) -> void {
+    }
 
     virtual auto get_root() -> OpenInfo& = 0;
 
@@ -96,65 +99,48 @@ class OpenInfo {
     Driver* const driver;
     uintptr_t     driver_data;
 
-    auto assert_opened(const bool write) -> bool {
-        if((write && write_count == 0) || (!write && read_count == 0 && write_count == 0)) {
-            // kernel bug
-            logger(LogLevel::Error, "kernel: file \"%s\" is not %s opened\n", name.data(), write ? "write" : "read");
-            return false;
-        }
-        return true;
-    }
-
   public:
-    uint32_t          read_count  = 0;
-    uint32_t          write_count = 0;
+    struct Count {
+        uint32_t read_count  = 0;
+        uint32_t write_count = 0;
+    };
+
+    using Children = std::unordered_map<std::string, OpenInfo>;
+
     size_t            filesize;
-    OpenInfo*         parent = nullptr;
-    OpenInfo*         mount  = nullptr;
+    OpenInfo*         parent;
+    OpenInfo*         mount = nullptr;
     const std::string name;
     const FileType    type;
     const Attributes  attributes;
 
-    std::unordered_map<std::string, OpenInfo> children;
+    Critical<Count>    critical_counts;
+    Critical<Children> critical_children;
 
     auto read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> {
-        if(!assert_opened(false)) {
-            return Error::Code::FileNotOpened;
-        }
         return driver->read(*this, offset, size, buffer);
     }
 
     auto write(const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> {
-        if(!assert_opened(true)) {
-            return Error::Code::FileNotOpened;
-        }
         return driver->write(*this, offset, size, buffer);
     }
 
     auto find(const std::string_view name) -> Result<OpenInfo> {
-        if(!assert_opened(false)) {
-            return Error::Code::FileNotOpened;
+        auto child_r = driver->find(*this, name);
+        if(!child_r) {
+            return child_r.as_error();
         }
+        auto& child = child_r.as_value();
 
-        auto r = driver->find(*this, name);
-        if(r) {
-            r.as_value().parent = this;
-        }
-        return r;
+        child.parent = this;
+        return std::move(child);
     }
 
     auto create(const std::string_view name, const FileType type) -> Result<OpenInfo> {
-        if(!assert_opened(true)) {
-            return Error::Code::FileNotOpened;
-        }
         return driver->create(*this, name, type);
     }
 
     auto readdir(const size_t index) -> Result<OpenInfo> {
-        if(!assert_opened(false)) {
-            return Error::Code::FileNotOpened;
-        }
-
         auto r = driver->readdir(*this, index);
         if(r) {
             r.as_value().parent = this;
@@ -163,9 +149,7 @@ class OpenInfo {
     }
 
     auto remove(const std::string_view name) -> Error {
-        if(!assert_opened(true)) {
-            return Error::Code::FileNotOpened;
-        }
+        auto [lock, children] = critical_children.access();
         if(children.find(std::string(name)) != children.end()) {
             return Error::Code::FileOpened;
         }
@@ -181,16 +165,10 @@ class OpenInfo {
     }
 
     auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<OpenInfo> {
-        if(!assert_opened(true)) {
-            return Error::Code::FileNotOpened;
-        }
-
         return driver->create_device(*this, name, device_impl);
     }
 
     auto control_device(const DeviceOperation op, void* const arg) -> Error {
-        // TODO
-        // is this control requires write access?
         return driver->control_device(*this, op, arg);
     }
 
@@ -204,8 +182,26 @@ class OpenInfo {
     }
 
     // used by Controller
-    auto is_busy() const -> bool {
-        return read_count != 0 || write_count != 0 || !children.empty() || mount != nullptr;
+    auto is_busy() -> bool {
+        if(mount != nullptr) {
+            return true;
+        }
+
+        {
+            auto [lock, counts] = critical_counts.access();
+            if(counts.read_count != 0 || counts.write_count != 0) {
+                return true;
+            }
+        }
+
+        {
+            auto [lock, children] = critical_children.access();
+            if(!children.empty()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     auto read_driver() const -> const Driver* {

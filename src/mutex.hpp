@@ -6,7 +6,7 @@
 class Mutex {
   private:
     std::atomic_flag flag;
-    process::EventID id;
+    process::EventID id = process::invalid_event;
 
     auto erase() -> void {
         if(id != process::invalid_event) {
@@ -41,8 +41,7 @@ class Mutex {
 
     auto operator=(Mutex&& o) -> Mutex& {
         erase();
-        id   = o.id;
-        o.id = process::invalid_event;
+        id = std::exchange(o.id, process::invalid_event);
         return *this;
     }
 
@@ -50,7 +49,8 @@ class Mutex {
         *this = std::move(o);
     }
 
-    Mutex() : id(process::manager->create_event()) {}
+    Mutex() : id(process::manager->create_event()) {
+    }
 
     ~Mutex() {
         erase();
@@ -87,7 +87,7 @@ class Event {
     auto notify() -> void {
         if(!flag.test_and_set()) {
             if(const auto e = process::manager->notify_event(id)) {
-                logger(LogLevel::Error, "mutex: failed to notify event %lu(%lu)\n", id, e.as_int());
+                logger(LogLevel::Error, "event: failed to notify event %lu(%lu)\n", id, e.as_int());
             }
         }
     }

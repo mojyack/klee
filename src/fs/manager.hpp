@@ -47,8 +47,8 @@ class Manager {
     basic::Driver           basic_driver;
     dev::Driver             devfs_driver;
 
-    OpenInfo&                root;
-    std::vector<MountRecord> mount_records;
+    OpenInfo&                          root;
+    Critical<std::vector<MountRecord>> critical_mount_records;
 
     static auto split_path(const std::string_view path) -> std::vector<std::string_view> {
         auto r = std::vector<std::string_view>();
@@ -74,22 +74,13 @@ class Manager {
         return r;
     }
 
-    static auto find_top_mountpoint(OpenInfo* node) -> Result<OpenInfo*> {
-        if(node->mount == nullptr) {
-            return Error::Code::NotMounted;
-        }
-        while(node->mount->mount != nullptr) {
-            node = node->mount;
-        }
-        return node;
-    }
-
     auto open_root(const OpenMode mode) -> Result<Handle> {
         auto info = follow_mountpoints(&root);
         if(const auto e = try_open(info, mode)) {
             return e;
         }
-        return Handle(info, mode);
+        auto handle = Handle(info, mode);
+        return handle;
     }
 
     auto open_parent_directory(std::vector<std::string_view>& elms) -> Result<Handle> {
@@ -159,29 +150,32 @@ class Manager {
     }
 
     auto close(Handle& handle) -> void {
-        if(handle.data == nullptr) {
+        const auto expired = handle.expired.exchange(true);
+        if(expired) {
             return;
         }
 
         auto node = handle.data;
-
-        handle.data->on_handle_destroy();
-        handle.data = nullptr;
+        node->on_handle_destroy();
         handle.write_event.reset();
 
-        if(handle.mode.read) {
-            node->read_count -= 1;
-        }
-        if(handle.mode.write) {
-            node->write_count -= 1;
+        {
+            auto [lock, counts] = node->critical_counts.access();
+            if(handle.mode.read) {
+                counts.read_count -= 1;
+            }
+            if(handle.mode.write) {
+                counts.write_count -= 1;
+            }
         }
         while(node->parent != nullptr) {
             if(node->is_busy() || node->attributes.volume_root) {
                 break;
             }
 
-            const auto parent = node->parent;
-            parent->children.erase(node->name);
+            const auto parent     = node->parent;
+            auto [lock, children] = parent->critical_children.access();
+            children.erase(node->name);
             node = parent;
         }
     }
@@ -229,12 +223,14 @@ class Manager {
             }
         }
 
+        auto [lock, mount_records] = critical_mount_records.access();
         mount_records.emplace_back(std::string(device), normalize_path(mountpoint_path), std::move(mountpoint_handle), fs_driver, shared_driver);
         return Success();
     }
 
     auto unmount(const std::string_view mountpoint_path) -> Error {
-        const auto path = normalize_path(mountpoint_path);
+        const auto path            = normalize_path(mountpoint_path);
+        auto [lock, mount_records] = critical_mount_records.access();
         for(auto i = mount_records.rbegin(); i != mount_records.rend(); i += 1) {
             if(i->mountpoint_path != path) {
                 continue;
@@ -257,6 +253,8 @@ class Manager {
     }
 
     auto get_mounts() const -> std::vector<std::array<std::string, 2>> {
+        auto [lock, mount_records] = critical_mount_records.access();
+
         auto r = std::vector<std::array<std::string, 2>>(mount_records.size());
         for(auto i = 0; i < mount_records.size(); i += 1) {
             r[i][0] = mount_records[i].device;
@@ -298,18 +296,14 @@ class Manager {
     Manager() : root(basic_driver.get_root()) {}
 };
 
-inline auto critical_manager = (Critical<Manager>*)(nullptr);
+inline auto manager = (Manager*)(nullptr);
 
 inline auto Handle::close() -> void {
-    if(data != nullptr) {
-        auto [lock, manager] = critical_manager->access();
-        manager.close(*this);
-    }
+    manager->close(*this);
 }
 
 inline fat::BlockDevice::~BlockDevice() {
-    auto& manager = critical_manager->assume_locked();
-    manager.close(handle);
+    manager->close(handle);
 }
 
 inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
@@ -329,10 +323,9 @@ inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
             }
         }
 
-        auto [lock, manager] = critical_manager->access();
         // TODO
         // pass exit code
-        [[maybe_unused]] const auto exit_code = manager.set_sata_devices(std::move(sata_devices)).as_int();
+        [[maybe_unused]] const auto exit_code = manager->set_sata_devices(std::move(sata_devices)).as_int();
     }
 
     process::manager->post_kernel_message_with_cli(MessageType::DeviceFinderDone);

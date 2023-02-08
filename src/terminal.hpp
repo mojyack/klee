@@ -240,17 +240,13 @@ class EventsWaiter {
     }
 };
 
-#define handle_or(path, mode)                                       \
-    auto handle_result = Result<fs::Handle>();                      \
-    {                                                               \
-        auto [lock, manager] = fs::critical_manager->access();      \
-        handle_result        = manager.open(path, mode);            \
-    }                                                               \
-    if(!handle_result) {                                            \
-        print("open error: %d", handle_result.as_error().as_int()); \
-        return true;                                                \
-    }                                                               \
-    auto& handle = handle_result.as_value();
+#define handle_or(path, mode)                                  \
+    auto handle_r = fs::manager->open(path, mode);             \
+    if(!handle_r) {                                            \
+        print("open error: %d", handle_r.as_error().as_int()); \
+        return true;                                           \
+    }                                                          \
+    auto& handle = handle_r.as_value();
 
 class Shell {
   private:
@@ -327,11 +323,7 @@ class Shell {
             }
         } else if(argv[0] == "mount") {
             if(argv.size() == 1) {
-                auto mounts = std::vector<std::array<std::string, 2>>();
-                {
-                    auto [lock, manager] = fs::critical_manager->access();
-                    mounts               = manager.get_mounts();
-                }
+                const auto mounts = fs::manager->get_mounts();
                 if(mounts.empty()) {
                     puts("(no mounts)");
                     return true;
@@ -340,12 +332,7 @@ class Shell {
                     print("%s on \"%s\"\n", m[0].data(), m[1].data());
                 }
             } else if(argv.size() == 3) {
-                auto e = Error();
-                {
-                    auto [lock, manager] = fs::critical_manager->access();
-                    e                    = manager.mount(argv[1], argv[2]);
-                }
-                if(e) {
+                if(const auto e = fs::manager->mount(argv[1], argv[2])) {
                     print("mount error: %d\n", e.as_int());
                 }
             } else {
@@ -357,12 +344,7 @@ class Shell {
                 puts("usage: umount MOUNTPOINT");
                 return true;
             }
-            auto e = Error();
-            {
-                auto [lock, manager] = fs::critical_manager->access();
-                e                    = manager.unmount(argv[1]);
-            }
-            if(e) {
+            if(const auto e = fs::manager->unmount(argv[1])) {
                 print("unmount error: %d\n", e.as_int());
             }
         } else if(argv[0] == "ls") {
@@ -511,11 +493,7 @@ class Shell {
 #undef handle_or
 
 #define handle_or(var, path, mode)                                      \
-    auto var##_result = Result<fs::Handle>();                           \
-    {                                                                   \
-        auto [lock, manager] = fs::critical_manager->access();          \
-        var##_result         = manager.open(path, mode);                \
-    }                                                                   \
+    auto var##_result = fs::manager->open(path, mode);                  \
     if(!var##_result) {                                                 \
         printk("terminal: handle error %d\n", var##_result.as_error()); \
         process::manager->exit_this_thread();                           \

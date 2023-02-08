@@ -102,7 +102,7 @@ struct Number {
     uint32_t base;
     uint32_t fill;
 
-    Number(const auto data, const uint32_t base = 16, const uint32_t fill = 16) : data(static_cast<size_t>(data)),
+    Number(const auto data, const uint32_t base = 16, const uint32_t fill = 16) : data((size_t)data),
                                                                                   base(base),
                                                                                   fill(fill) {}
 };

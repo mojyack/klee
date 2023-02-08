@@ -51,11 +51,15 @@ class AutoMutex {
 template <MutexLike Mutex, class T>
 class SharedValue {
   private:
-    Mutex mutex;
-    T     data;
+    mutable Mutex mutex;
+    T             data;
 
   public:
     auto access() -> std::pair<AutoMutex<Mutex>, T&> {
+        return {AutoMutex(mutex), data};
+    }
+
+    auto access() const -> std::pair<AutoMutex<Mutex>, const T&> {
         return {AutoMutex(mutex), data};
     }
 
@@ -74,8 +78,11 @@ class SharedValue {
         return data;
     }
 
+    SharedValue() {
+    }
+
     template <class... Args>
-    SharedValue(Args&&... args) : data(std::move(args)...) {}
-    SharedValue() {}
+    SharedValue(Args&&... args) : data(std::forward<Args>(args)...) {
+    }
 };
 } // namespace mutex_like
