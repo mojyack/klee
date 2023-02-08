@@ -143,7 +143,9 @@ class DirectoryIterator {
         auto buffer        = std::vector<uint8_t>(cluster_size_bytes);
 
         while(true) { // iterate over clusters(fats)
-            error_or(op.read_cluster(cluster, buffer.data()));
+            if(const auto e = op.read_cluster(cluster, buffer.data())) {
+                return e;
+            }
 
             while(index < directory_entry_table_size) { // iterate over directory entries
                 auto& entry = *reinterpret_cast<DirectoryEntry*>(buffer.data() + sizeof(DirectoryEntry) * (index % directory_entry_table_size));
@@ -179,7 +181,9 @@ class DirectoryIterator {
         auto buffer       = std::vector<uint8_t>(cluster_size_bytes);
 
         while(true) { // iterate over clusters(fats)
-            error_or(op.read_cluster(cluster, buffer.data()));
+            if(const auto e = op.read_cluster(cluster, buffer.data())) {
+                return e;
+            }
 
             while(index < directory_entry_table_size) { // iterate over directory entries
                 auto& entry = *reinterpret_cast<DirectoryEntry*>(buffer.data() + sizeof(DirectoryEntry) * (index % directory_entry_table_size));
@@ -294,7 +298,9 @@ class Driver : public fs::Driver {
             const auto offset_in_cluster = offset % bytes_per_cluster;
             const auto size_in_cluster   = bytes_per_cluster - offset_in_cluster;
             const auto copy_len          = size < size_in_cluster ? size : size_in_cluster;
-            error_or(op.read_cluster(cluster, read_buffer.data()));
+            if(const auto e = op.read_cluster(cluster, read_buffer.data())) {
+                return e;
+            }
             memcpy(buffer, read_buffer.data() + offset_in_cluster, copy_len);
             buffer += copy_len;
             size -= copy_len;
@@ -304,7 +310,9 @@ class Driver : public fs::Driver {
         }
 
         while(size >= bytes_per_cluster) {
-            error_or(op.read_cluster(cluster, read_buffer.data()));
+            if(const auto e = op.read_cluster(cluster, read_buffer.data())) {
+                return e;
+            }
             memcpy(buffer, read_buffer.data(), bytes_per_cluster);
             buffer += bytes_per_cluster;
             size -= bytes_per_cluster;
@@ -314,7 +322,9 @@ class Driver : public fs::Driver {
         }
 
         if(size != 0) {
-            error_or(op.read_cluster(cluster, read_buffer.data()));
+            if(const auto e = op.read_cluster(cluster, read_buffer.data())) {
+                return e;
+            }
             memcpy(buffer, read_buffer.data(), size);
         }
 
@@ -360,7 +370,12 @@ class Driver : public fs::Driver {
         if(iterator.skip(index)) {
             return Error::Code::IndexOutOfRange;
         }
-        value_or(dinfo, iterator.read());
+
+        auto dinfo_r = iterator.read();
+        if(!dinfo_r) {
+            return dinfo_r.as_error();
+        }
+        auto& dinfo = dinfo_r.as_value();
 
         return openinfo_from_dinfo(dinfo);
     }

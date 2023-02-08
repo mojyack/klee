@@ -269,11 +269,15 @@ class Manager {
         for(auto i = 0; i < sata_devices.size(); i += 1) {
             auto&      d   = sata_devices[i];
             const auto len = snprintf(buf.data(), buf.size(), "disk%d", i);
-            error_or(create_device_file({buf.data(), size_t(len)}, &d.device));
+            if(const auto e = create_device_file({buf.data(), size_t(len)}, &d.device)) {
+                return e;
+            }
             for(auto j = 0; j < d.partitions.size(); j += 1) {
                 auto&      p   = d.partitions[j];
                 const auto len = snprintf(buf.data(), buf.size(), "disk%dp%d", i, j);
-                error_or(create_device_file({buf.data(), size_t(len)}, p.device.get()));
+                if(const auto e = create_device_file({buf.data(), size_t(len)}, p.device.get())) {
+                    return e;
+                }
             }
         }
         return Success();

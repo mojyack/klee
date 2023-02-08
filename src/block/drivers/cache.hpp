@@ -2,7 +2,6 @@
 #include <concepts>
 #include <unordered_map>
 
-#include "../../macro.hpp"
 #include "../block.hpp"
 
 namespace block::cache {
@@ -27,7 +26,9 @@ class Device : public fs::dev::BlockDevice {
         }
 
         auto new_cache = SectorCache(bytes_per_sector);
-        error_or(parent.read_sector(sector, 1, new_cache.data.get()));
+        if(const auto e = parent.read_sector(sector, 1, new_cache.data.get())) {
+            return e;
+        }
 
         return &cache.emplace(sector, std::move(new_cache)).first->second;
     }
