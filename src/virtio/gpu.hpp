@@ -3,6 +3,7 @@
 
 #include "../fs/drivers/dev.hpp"
 #include "../interrupt/vector.hpp"
+#include "../lapic/registers.hpp"
 #include "../log.hpp"
 #include "../pci.hpp"
 #include "pci.hpp"
@@ -182,9 +183,9 @@ auto queue_data(queue::Queue& queue, ControlHeader&& header, Payload&& payload) 
 class Framebuffer : public fs::dev::FramebufferDevice {
   private:
     std::array<memory::FrameID, 2> buffers;
-    queue::Queue*          control_queue;
-    uint32_t*              sync_done;
-    bool                   flip = false;
+    queue::Queue*                  control_queue;
+    uint32_t*                      sync_done;
+    bool                           flip = false;
 
   public:
     auto swap() -> void override {
@@ -212,8 +213,8 @@ class Framebuffer : public fs::dev::FramebufferDevice {
     auto operator=(Framebuffer&&) -> Framebuffer& = delete;
 
     Framebuffer(const std::array<memory::FrameID, 2> buffers, const std::array<size_t, 2> buffer_size, queue::Queue& control_queue, uint32_t* const sync_done, Event**& sync_done_event) : buffers(buffers),
-                                                                                                                                                                                   control_queue(&control_queue),
-                                                                                                                                                                                   sync_done(sync_done) {
+                                                                                                                                                                                           control_queue(&control_queue),
+                                                                                                                                                                                           sync_done(sync_done) {
         data              = static_cast<uint8_t*>(buffers[flip].get_frame());
         this->buffer_size = buffer_size;
         sync_done_event   = &write_event;
@@ -236,10 +237,10 @@ class GPUDevice {
 
     SetupStage setup_stage = SetupStage::Init;
 
-    std::array<uint32_t, 2>                          display_size = {1024, 768};
+    std::array<uint32_t, 2>                                  display_size = {1024, 768};
     std::pair<std::array<memory::SmartFrameID, 2>, uint64_t> framebuffer;
-    uint32_t                                         sync_done       = 1;
-    Event**                                          sync_done_event = nullptr;
+    uint32_t                                                 sync_done       = 1;
+    Event**                                                  sync_done_event = nullptr;
 
   public:
     auto process_control_queue() -> Error {
@@ -403,7 +404,7 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
         cap_addr = header.bits.next_ptr;
     }
     if(common_config == nullptr || notify_base == nullptr || device_config == nullptr || isr == nullptr) {
-        logger(LogLevel::Error, "the device lacks capability\n");
+        logger(LogLevel::Error, "virtio: gpu: device lacks capability\n");
         return Error::Code::VirtIOLegacyDevice;
     }
     const auto device_features   = common_config->read_device_features();
@@ -411,7 +412,7 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
     common_config->device_status = device_status;
     auto driver_features         = Features(0);
     if(!(device_features & features::version1)) {
-        logger(LogLevel::Error, "legacy device found\n");
+        logger(LogLevel::Error, "virtio: gpu: legacy device found\n");
         return Error::Code::VirtIOLegacyDevice;
     } else {
         driver_features |= features::version1;
@@ -420,29 +421,28 @@ inline auto initialize(const ::pci::Device& device) -> Result<GPUDevice> {
     device_status |= device_status::features_ok;
     common_config->device_status = device_status;
     if(!(common_config->device_status & device_status::features_ok)) {
-        logger(LogLevel::Error, "device not ready\n");
+        logger(LogLevel::Error, "virtio: gpu: device not ready\n");
         return Error::Code::VirtIODeviceNotReady;
     }
-    const auto bsp_local_apic_id = *reinterpret_cast<const uint32_t*>(0xFEE00020) >> 24;
+    const auto lapic_id = lapic::read_lapic_id();
 
     const auto [control_queue_number, cursor_queue_number] = common_config->get_queue_number<2>();
 
-    common_config->queue_select   = control_queue_number;
-    const auto control_queue_size = common_config->queue_size;
+    common_config->queue_select = control_queue_number;
 
-    auto control_queue = queue::Queue(control_queue_size, control_queue_number, &common_config->queue_select, notify_base + common_config->queue_notify_off * notify_off_multiplier);
-    if(const auto error = device.configure_msix_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::VirtIOGPUControl, 0)) {
+    auto control_queue = queue::Queue(control_queue_number, common_config, notify_base + common_config->queue_notify_off * notify_off_multiplier);
+    if(const auto error = device.configure_msix_fixed_destination(lapic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::VirtIOGPUControl, 0)) {
         return error;
     }
-    common_config->set_queue(control_queue_number, control_queue, 0);
+    queue::set_queue_to_config(*common_config, control_queue_number, control_queue, 0);
 
-    common_config->queue_select  = cursor_queue_number;
-    const auto cursor_queue_size = common_config->queue_size;
-    auto       cursor_queue      = queue::Queue(cursor_queue_size, cursor_queue_number, &common_config->queue_select, notify_base + common_config->queue_notify_off * notify_off_multiplier);
-    if(const auto error = device.configure_msix_fixed_destination(bsp_local_apic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::VirtIOGPUCursor, 1)) {
+    common_config->queue_select = cursor_queue_number;
+
+    auto cursor_queue = queue::Queue(cursor_queue_number, common_config, notify_base + common_config->queue_notify_off * notify_off_multiplier);
+    if(const auto error = device.configure_msix_fixed_destination(lapic_id, ::pci::MSITriggerMode::Level, ::pci::MSIDeliveryMode::Fixed, ::interrupt::Vector::VirtIOGPUCursor, 1)) {
         return error;
     }
-    common_config->set_queue(cursor_queue_number, cursor_queue, 1);
+    queue::set_queue_to_config(*common_config, cursor_queue_number, cursor_queue, 1);
 
     device_status |= device_status::driver_ok;
     common_config->device_status = device_status;

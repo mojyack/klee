@@ -4,9 +4,10 @@
 
 #include "../log.hpp"
 #include "../memory/allocator.hpp"
+#include "pci.hpp"
 
 namespace virtio::queue {
-struct Descriptor {
+struct alignas(16) Descriptor {
     using Flags = uint16_t;
 
     static constexpr auto next     = 1 << 0; // mark a buffer as continuing via the next field
@@ -18,6 +19,8 @@ struct Descriptor {
     Flags    flags;
     uint16_t next_index;
 } __attribute__((packed));
+
+static_assert(sizeof(Descriptor) == 16);
 
 struct alignas(2) AvailableRing {
     using Flags = uint16_t;
@@ -64,17 +67,17 @@ struct alignas(4) UsedRing {
 
 class Queue {
   private:
-    uint32_t                       size;
     std::unique_ptr<Descriptor>    descriptors;
     std::unique_ptr<AvailableRing> available_ring;
     std::unique_ptr<UsedRing>      used_ring;
     uint32_t                       added_descriptors = 0;
     uint32_t                       free_head         = 0;
     uint32_t                       last_used         = 0;
+    uint16_t                       size;
 
-    uint16_t           queue_number;
-    volatile uint16_t* queue_select;
-    uint16_t*          notify_address;
+    uint16_t                    queue_number;
+    uint16_t*                   notify_address;
+    volatile pci::CommonConfig* config;
 
     memory::SmartFrameID frame_id;
 
@@ -116,7 +119,7 @@ class Queue {
 
         barrier();
 
-        *queue_select = queue_number;
+        config->queue_select = queue_number;
 
         *reinterpret_cast<volatile uint16_t*>(notify_address) = avail.index;
     }
@@ -161,13 +164,14 @@ class Queue {
 
     Queue()        = default;
     Queue(Queue&&) = default;
-    Queue(const uint32_t size, const uint16_t queue_number, volatile uint16_t* const queue_select, uint16_t* const notify_address) : size(size),
-                                                                                                                                     descriptors(new(std::align_val_t{16}) queue::Descriptor[size]),
-                                                                                                                                     available_ring(AvailableRing::create(size)),
-                                                                                                                                     used_ring(UsedRing::create(size)),
-                                                                                                                                     queue_number(queue_number),
-                                                                                                                                     queue_select(queue_select),
-                                                                                                                                     notify_address(notify_address) {
+    Queue(const uint16_t queue_number, volatile pci::CommonConfig* config, uint16_t* const notify_address) : size(config->queue_size),
+                                                                                                             queue_number(queue_number),
+                                                                                                             notify_address(notify_address),
+                                                                                                             config(config) {
+        descriptors.reset(new queue::Descriptor[size]);
+        available_ring.reset(AvailableRing::create(size));
+        used_ring.reset(UsedRing::create(size));
+
         if(auto r = memory::allocate(size); !r) {
             logger(LogLevel::Error, "virtio: failed to allocate frames for virtio device: %d\n", r.as_error());
             return;
@@ -193,4 +197,21 @@ class Queue {
         used.index = 0;
     }
 };
+
+inline auto set_queue_to_config(volatile pci::CommonConfig& config, const uint16_t queue_number, queue::Queue& queue, std::optional<uint32_t> msix_entry_number) -> void {
+    constexpr auto no_vector = 0xFFFF;
+
+    const auto [descriptors, avail, used] = queue.get_pointers();
+
+    config.queue_select = queue_number;
+    config.queue_desc   = reinterpret_cast<uint64_t>(descriptors);
+    config.queue_driver = reinterpret_cast<uint64_t>(avail);
+    config.queue_device = reinterpret_cast<uint64_t>(used);
+    if(msix_entry_number) {
+        config.config_msix_vector = no_vector;
+        config.queue_msix_vector  = *msix_entry_number;
+    }
+    config.queue_enable = 1;
+}
+
 } // namespace virtio::queue

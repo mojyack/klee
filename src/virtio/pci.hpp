@@ -3,7 +3,6 @@
 
 #include "../pci.hpp"
 #include "flags.hpp"
-#include "queue.hpp"
 
 namespace virtio::pci {
 enum class ConfigType : uint32_t {
@@ -116,21 +115,6 @@ struct CommonConfig {
         return r;
     }
 
-    auto set_queue(const uint16_t queue_number, queue::Queue& queue, std::optional<uint32_t> msix_entry_number) volatile -> void {
-        constexpr auto no_vector = 0xFFFF;
-
-        const auto [descriptors, avail, used] = queue.get_pointers();
-
-        queue_select = queue_number;
-        queue_desc   = reinterpret_cast<uint64_t>(descriptors);
-        queue_driver = reinterpret_cast<uint64_t>(avail);
-        queue_device = reinterpret_cast<uint64_t>(used);
-        if(msix_entry_number) {
-            config_msix_vector = no_vector;
-            queue_msix_vector  = *msix_entry_number;
-        }
-        queue_enable = 1;
-    }
 } __attribute__((packed));
 
 inline auto get_config_address(const ::pci::Device& dev, const Capability& cap) -> void* {
