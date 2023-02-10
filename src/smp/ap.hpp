@@ -21,7 +21,7 @@ extern "C" uint64_t         var_kernel_entry;
 extern "C" uint64_t         var_kernel_stack;
 extern "C" APBootParameter* var_boot_parameter;
 
-inline auto install_trampoline(std::byte* const work, APEntry kernel_entry, const uint64_t kernel_stack, const APBootParameter* const boot_parameter) -> void {
+inline auto install_trampoline(std::byte* const work, APEntry kernel_entry, const uint64_t kernel_stack, const APBootParameter* const boot_parameter) -> bool {
     static const auto var_cr3_offset            = std::bit_cast<std::byte*>(&var_cr3) - &trampoline;
     static const auto var_kernel_entry_offset   = std::bit_cast<std::byte*>(&var_kernel_entry) - &trampoline;
     static const auto var_kernel_stack_offset   = std::bit_cast<std::byte*>(&var_kernel_stack) - &trampoline;
@@ -33,11 +33,18 @@ inline auto install_trampoline(std::byte* const work, APEntry kernel_entry, cons
     const auto var_kernel_stack_addr   = std::bit_cast<uint64_t*>(work + var_kernel_stack_offset);
     const auto var_boot_parameter_addr = std::bit_cast<const APBootParameter**>(work + var_boot_parameter_offset);
 
+    const auto pml4 = std::bit_cast<uint64_t>(process::manager->get_this_thread()->process->get_pml4_address());
+    if(pml4 >= 0x0000'0001'0000'0000u) {
+        logger(LogLevel::Error, "smp: pml4 table is at higher memory, cannot boot ap\n");
+        return false;
+    }
+
     memcpy(work, &trampoline, trampoline_size);
-    *var_cr3_addr            = static_cast<uint32_t>(std::bit_cast<uintptr_t>(boot_parameter->processor_resource->pml4_table.data.data()));
+    *var_cr3_addr            = pml4;
     *var_kernel_entry_addr   = std::bit_cast<uint64_t>(kernel_entry);
     *var_kernel_stack_addr   = kernel_stack;
     *var_boot_parameter_addr = boot_parameter;
+    return true;
 }
 
 inline auto send_init_start(const uint8_t target_lapic_id, const uintptr_t start) -> void {
@@ -106,7 +113,9 @@ inline auto start_ap(const memory::FrameID page, const uint8_t target_lapic_id, 
     const auto work = page.get_frame();
     logger(LogLevel::Debug, "smp: using frame %x as a trampoline code, code size is %lu bytes\n", std::bit_cast<size_t>(work) >> 12, trampoline_size);
 
-    install_trampoline(std::bit_cast<std::byte*>(work), kernel_entry, kernel_stack, boot_parameter);
+    if(!install_trampoline(std::bit_cast<std::byte*>(work), kernel_entry, kernel_stack, boot_parameter)) {
+        return false;
+    }
     send_init_start(target_lapic_id, std::bit_cast<uintptr_t>(work));
 
     return true;

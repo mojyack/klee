@@ -51,7 +51,6 @@ class ProcessorLocal {
     }
 
   public:
-    paging::PML4Table*                                pml4_table;
     Thread*                                           this_thread;
     std::array<std::deque<Thread*>, max_nice * 2 + 1> run_queue;
     uint8_t                                           lapic_id;
@@ -133,13 +132,8 @@ class Manager {
             return;
         }
 
-        //        logger(LogLevel::Debug, "manager: context switch(%lu.%lu->%lu.%lu)", current_thread->process->id, current_thread->id, next_thread->process->id, next_thread->id);
+        // logger(LogLevel::Debug, "manager: context switch(%lu.%lu->%lu.%lu)", current_thread->process->id, current_thread->id, next_thread->process->id, next_thread->id);
 
-        {
-            const auto process = next_thread->process;
-            const auto lock    = AutoLock(process->page_map_mutex);
-            process->apply_page_map(lock, *local.pml4_table);
-        }
         alignas(16) const auto next_context = next_thread->context;
         switch_context(&next_context, &current_thread->context, lock.get_raw_mutex()->get_native());
     }
@@ -168,11 +162,6 @@ class Manager {
             lock.release();
         }
 
-        {
-            const auto process = next_thread->process;
-            const auto lock    = AutoLock(process->page_map_mutex);
-            process->apply_page_map(lock, *local.pml4_table);
-        }
         restore_context(&next_thread->context);
     }
 
@@ -589,20 +578,14 @@ class Manager {
         return local.this_thread;
     }
 
-    auto get_pml4_table() -> paging::PML4Table& {
-        auto& local = locals[smp::get_processor_number()];
-        return *local.pml4_table;
-    }
-
     // for kernel processes
     auto expand_locals(const size_t new_size) -> void {
         locals.resize(new_size);
     }
 
-    auto capture_context(paging::PML4Table& pml4_table) -> void {
-        auto& local      = locals[smp::get_processor_number()];
-        local.pml4_table = &pml4_table;
-        local.lapic_id   = lapic::read_lapic_id();
+    auto capture_context() -> void {
+        auto& local    = locals[smp::get_processor_number()];
+        local.lapic_id = lapic::read_lapic_id();
 
         // capture this context
         {
@@ -729,13 +712,12 @@ class Manager {
     }
     // ~for interrupt handlers
 
-    Manager(paging::PML4Table& pml4_table) : thread_joined_event(create_event()),
-                                             process_joined_event(create_event()) {
+    Manager() : thread_joined_event(create_event()),
+                process_joined_event(create_event()) {
         locals.resize(1);
         auto& local = locals[smp::get_processor_number()];
-
-        kernel_pid = create_process();
-        capture_context(pml4_table);
+        kernel_pid  = create_process();
+        capture_context();
         event_processor = local.this_thread;
     }
 };

@@ -7,6 +7,7 @@
 #include "memory/allocator.hpp"
 #include "paging.hpp"
 #include "process/manager.hpp"
+#include "process/process-detail.hpp"
 
 namespace elf {
 struct ELF {
@@ -55,7 +56,7 @@ struct LoadedELF {
 
 static_assert(paging::bytes_per_page == memory::bytes_per_frame);
 
-inline auto load_elf(memory::SmartFrameID& image, paging::PageDirectoryPointerTable& pdpt, process::Process* const process, const process::AutoLock& lock) -> Result<LoadedELF> {
+inline auto load_elf(memory::SmartFrameID& image, process::Process* const process) -> Result<LoadedELF> {
     const auto bytes_limit = image.get_frames() * memory::bytes_per_frame;
     const auto image_addr  = reinterpret_cast<uint8_t*>(image->get_frame());
 
@@ -77,7 +78,7 @@ inline auto load_elf(memory::SmartFrameID& image, paging::PageDirectoryPointerTa
         segment_first = std::min(segment_first, ph.p_address);
         segment_last  = std::max(segment_last, ph.p_address + ph.memsize);
     }
-    segment_first = segment_first & 0xFFFF'FFFF'FFFF'F000;
+    segment_first = segment_first & 0xFFFF'FFFF'FFFF'F000u;
 
     const auto num_frames       = (segment_last - segment_first + memory::bytes_per_frame - 1) / memory::bytes_per_frame;
     auto       allocated_frames = std::vector<memory::SmartSingleFrameID>(num_frames);
@@ -93,10 +94,11 @@ inline auto load_elf(memory::SmartFrameID& image, paging::PageDirectoryPointerTa
 
         const auto physical_addr = reinterpret_cast<uint64_t>(f->get_frame());
         const auto virtual_addr  = segment_first + paging::bytes_per_page * i;
-        paging::map_virtual_to_physical(&pdpt, virtual_addr, physical_addr, paging::Attribute::UserExecute);
+        {
+            auto [lock, pml4] = process->detail->critical_pml4.access();
+            paging::map_virtual_to_physical(pml4, virtual_addr, physical_addr, paging::Attribute::UserExecute);
+        }
     }
-
-    process->apply_page_map(lock, process::manager->get_pml4_table());
 
     auto cr0               = amd64::cr::CR0::load();
     cr0.bits.write_protect = 0;

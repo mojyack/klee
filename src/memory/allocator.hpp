@@ -2,6 +2,7 @@
 #include <array>
 #include <limits>
 
+#include "../constants.hpp"
 #include "../error.hpp"
 #include "../libc-support.hpp"
 #include "../mutex.hpp"
@@ -14,9 +15,8 @@ class BitmapMemoryManager {
   private:
     using MaplineType = uint64_t;
 
-    static constexpr auto max_physical_memory_bytes = 32_GiB;
-    static constexpr auto required_frames           = max_physical_memory_bytes / bytes_per_frame;
-    static constexpr auto bits_per_mapline          = 8 * sizeof(MaplineType);
+    static constexpr auto required_frames  = size_t(constants::supported_memory_limit) * 1024 * 1024 * 1024 / bytes_per_frame;
+    static constexpr auto bits_per_mapline = 8 * sizeof(MaplineType);
 
     std::array<MaplineType, required_frames / bits_per_mapline> allocation_map;
     FrameID                                                     range_begin = FrameID(0);

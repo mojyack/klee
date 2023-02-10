@@ -20,11 +20,6 @@ struct alignas(16) ThreadContext {
     std::array<uint8_t, 512> fxsave_area;                            // offset 0xc0
 } __attribute__((packed));
 
-struct PageMap {
-    paging::PageDirectoryPointerTable       upper_page_map; // 0xFFFF800000000000 ~ 0xFFFF807FFFFFFFFF
-    std::vector<memory::SmartSingleFrameID> allocated_frames;
-};
-
 using ThreadEntry = void(uint64_t data, int64_t id);
 
 using Nice      = int32_t;
@@ -39,7 +34,20 @@ using IDMap = dense_map::DenseMap<K, std::unique_ptr<T>>;
 
 using AutoLock = mutex_like::AutoMutex<spinlock::SpinLock>;
 
-struct Process;
+struct Thread;
+
+struct ProcessDetail;
+
+struct Process {
+    const uint64_t id;
+
+    std::unique_ptr<ProcessDetail> detail;
+    IDMap<ThreadID, Thread>        threads;
+
+    auto get_pml4_address() -> paging::PageMapLevel4Table*;
+
+    Process(uint64_t id);
+};
 
 struct Thread {
     using StackUnitType = uint64_t;
@@ -60,11 +68,6 @@ struct Thread {
     bool                 zombie       = false;
     bool                 movable      = true;
 
-    // 0000RESERVED0000 00PML4000 00PDPT000 000PD0000 000PT0000 000OFFSET000
-    // 0000000000000000 000000000 000000000 000000000 000000000 000000000000   // implementation limit of klee
-    // or               or        ~         ~         ~         ~
-    // 1111111111111111 100000000 111111111 111111111 111111111 111111111111
-
     auto init_context(ThreadEntry* const func, const int64_t data) -> void {
         constexpr auto default_stack_bytes = size_t(4096);
         constexpr auto default_stack_count = default_stack_bytes / sizeof(StackUnitType);
@@ -78,7 +81,7 @@ struct Thread {
         context.rdi = id;
         context.rsi = data;
 
-        context.cr3    = amd64::cr::CR3::load().data;
+        context.cr3    = std::bit_cast<uint64_t>(&process->get_pml4_address()->data);
         context.rflags = 0x202;
         context.cs     = segment::kernel_cs.data;
         context.ss     = segment::kernel_ss.data;
@@ -89,28 +92,5 @@ struct Thread {
     }
 
     Thread(const uint64_t id, Process* const process) : id(id), process(process) {}
-};
-
-struct Process {
-    const uint64_t id;
-
-    std::unique_ptr<PageMap> page_map;
-    spinlock::SpinLock       page_map_mutex;
-
-    IDMap<ThreadID, Thread> threads;
-
-    auto apply_page_map(const AutoLock& /*lock*/, paging::PML4Table& pml4_table) -> void {
-        auto& pml4e = pml4_table.data[0b100000000];
-        if(page_map) {
-            pml4e.data              = reinterpret_cast<uint64_t>(page_map->upper_page_map.data.data());
-            pml4e.directory.present = 1;
-            pml4e.directory.write   = 1;
-            pml4e.directory.user    = 1;
-        } else {
-            pml4e.data = 0;
-        }
-    }
-
-    Process(const uint64_t id) : id(id) {}
 };
 } // namespace process

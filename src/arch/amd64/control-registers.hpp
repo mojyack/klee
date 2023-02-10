@@ -24,14 +24,14 @@ union CR0 {
 
     static auto load() -> CR0 {
         auto cr0 = CR0();
-        __asm__(
+        __asm__ volatile(
             "mov %0, cr0;"
             : "=r"(cr0.data));
         return cr0;
     }
 
     auto apply() const -> void {
-        __asm__(
+        __asm__ volatile(
             "mov cr0, %0;"
             :
             : "r"(data));
@@ -46,14 +46,14 @@ union CR3 {
 
     static auto load() -> CR3 {
         auto cr3 = CR3();
-        __asm__(
+        __asm__ volatile(
             "mov %0, cr3;"
             : "=r"(cr3.data));
         return cr3;
     }
 
     auto apply() const -> void {
-        __asm__(
+        __asm__ volatile(
             "mov cr3, %0;"
             :
             : "r"(data));

@@ -129,7 +129,6 @@ class Kernel {
         auto& processor_resource = *parameter->processor_resource;
         parameter->notify        = 1;
         apply_segments(processor_resource.gdt);
-        apply_pml4_table(processor_resource.pml4_table);
 
         auto tss_resource = segment::TSSResource();
         if(auto r = segment::setup_tss(processor_resource.gdt); !r) {
@@ -144,7 +143,7 @@ class Kernel {
 
         interrupt::initialize(processor_resource.idt);
         syscall::initialize_syscall();
-        process::manager->capture_context(processor_resource.pml4_table);
+        process::manager->capture_context();
 
         const auto this_thread = process::manager->get_this_thread();
         logger(LogLevel::Info, "kernel: processor %u ready, pid=%d tid=%d\n", smp::get_processor_number(), this_thread->process->id, this_thread->id);
@@ -167,7 +166,6 @@ class Kernel {
         }
 
         segment::create_segments(resource->gdt);
-        paging::create_identity_page_table(resource->pml4_table);
 
         const auto boot_parameter = smp::APBootParameter{.processor_resource = resource, .notify = 0};
         const auto stack_ptr      = std::bit_cast<uint64_t>(resource->stack->get_frame()) + memory::bytes_per_frame * n_stack_frames;
@@ -218,11 +216,25 @@ class Kernel {
 
   public:
     auto run() -> void {
+        // create debug output
+        // TODO
+        // remove this
+        auto debug_fb = debug::Framebuffer(framebuffer_config);
+        debug::fb     = &debug_fb;
+
         // setup memory manager
+        // - setup segmentaion
         segment::create_segments(processor_resource.gdt);
         segment::apply_segments(processor_resource.gdt);
-        paging::create_identity_page_table(processor_resource.pml4_table);
-        paging::apply_pml4_table(processor_resource.pml4_table);
+        // - setup paging
+        static auto temporary_pml4 = paging::PageMapLevel4Table();
+        {
+            auto& pml4e = temporary_pml4.data[0];
+            pml4e.data = &paging::get_identity_pdpt();
+            pml4e.bits.present = true;
+            pml4e.bits.write = true;
+        }
+        paging::apply_pml4_table(temporary_pml4);
         // - allocate lowest page for ap startup
         auto kernel_heap        = memory::SmartFrameID();
         auto ap_trampoline_page = memory::SmartSingleFrameID();
@@ -243,15 +255,9 @@ class Kernel {
         auto critical_allocator    = Critical<memory::BitmapMemoryManager*>(&memory_manager);
         memory::critical_allocator = &critical_allocator;
 
-        // create debug output
-        // TODO
-        // remove this
-        auto debug_fb = debug::Framebuffer(framebuffer_config);
-        debug::fb     = &debug_fb;
-
         // create task manager
         // mutex needs this
-        auto pm          = process::Manager(processor_resource.pml4_table);
+        auto pm          = process::Manager();
         process::manager = &pm;
 
         // create filesystem mananger
