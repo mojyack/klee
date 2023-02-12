@@ -1,7 +1,7 @@
 #pragma once
 #include <array>
 
-#include "../x86-descriptor.hpp"
+#include "../arch/x86/descriptor.hpp"
 
 namespace interrupt {
 union InterruptDescriptorAttribute {

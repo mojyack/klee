@@ -1,5 +1,5 @@
 #pragma once
-#include "../../register.hpp"
+#include "register.hpp"
 
 namespace usb {
 union HCSPARAMS1Bitmap {

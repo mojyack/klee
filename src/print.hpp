@@ -13,7 +13,7 @@ struct PrintBuffer {
     std::array<char, buffer_size> buffer;
     size_t                        head = 0;
     size_t                        len  = 0;
-    spinlock::SpinLock lock;
+    spinlock::SpinLock            lock;
 };
 
 inline auto printk_buffer = PrintBuffer();

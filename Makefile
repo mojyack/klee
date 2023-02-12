@@ -15,7 +15,7 @@ COMMON_FLAGS = -O3 -march=x86-64-v2 -masm=intel --target=$(TARGET) \
 
 CXX = clang++ $(INCLUDES) $(COMMON_FLAGS) \
 	  -fno-exceptions -mno-red-zone -fno-rtti -std=c++20 \
-	  -Wno-address-of-packed-member -Wno-deprecated-experimental-coroutine
+	  -Wno-deprecated-experimental-coroutine
 
 LIBRARY = $(BUILDENV)/lib
 

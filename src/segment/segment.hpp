@@ -1,9 +1,8 @@
 #pragma once
 #include <array>
 
+#include "../arch/x86/descriptor.hpp"
 #include "../asmcode.hpp"
-#include "../interrupt/type.hpp"
-#include "../x86-descriptor.hpp"
 
 namespace segment {
 union SegmentDescriptor {

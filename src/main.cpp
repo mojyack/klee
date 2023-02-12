@@ -417,8 +417,6 @@ class Kernel {
             case MessageType::AHCIInterrupt:
                 sata_controller->on_interrupt();
                 break;
-            case MessageType::Timer:
-                break;
             case MessageType::VirtIOGPUNewDevice: {
                 virtio_gpu_framebuffer = virtio_gpu->create_devfs_framebuffer();
                 if(const auto e = fs::manager->create_device_file("fb-virtio0", virtio_gpu_framebuffer.get())) {

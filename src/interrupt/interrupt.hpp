@@ -4,7 +4,6 @@
 #include <deque>
 
 #include "../message.hpp"
-#include "../x86-descriptor.hpp"
 #include "fault_handlers.hpp"
 #include "type.hpp"
 
