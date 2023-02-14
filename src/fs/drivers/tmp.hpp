@@ -154,7 +154,7 @@ class Directory : public Object {
 class Driver : public fs::Driver {
   private:
     std::variant<File, Directory> data;
-    OpenInfo                      root;
+    FileOperator                  root;
 
     template <FileObject T>
     auto data_as(const uintptr_t data) -> Result<T*> {
@@ -165,19 +165,19 @@ class Driver : public fs::Driver {
         return &std::get<T>(obj);
     }
 
-    auto create_openinfo(const std::variant<File, Directory>& variant) -> OpenInfo {
+    auto create_file_operator(const std::variant<File, Directory>& variant) -> FileOperator {
         if(std::holds_alternative<File>(variant)) {
             auto& o = std::get<File>(variant);
-            return OpenInfo(o.get_name(), *this, &variant, FileType::Regular, o.get_size());
+            return FileOperator(o.get_name(), *this, &variant, FileType::Regular, o.get_size());
         } else {
             auto& o = std::get<Directory>(variant);
-            return OpenInfo(o.get_name(), *this, &variant, FileType::Directory, 0);
+            return FileOperator(o.get_name(), *this, &variant, FileType::Directory, 0);
         }
     }
 
   public:
-    auto read(OpenInfo& info, const size_t offset, const size_t size, void* const buffer) -> Result<size_t> override {
-        auto file_r = data_as<File>(info.get_driver_data());
+    auto read(FileOperator& fop, const size_t offset, const size_t size, void* const buffer) -> Result<size_t> override {
+        auto file_r = data_as<File>(fop.get_driver_data());
         if(!file_r) {
             return file_r.as_error();
         }
@@ -186,8 +186,8 @@ class Driver : public fs::Driver {
         return file->read(offset, size, static_cast<uint8_t*>(buffer));
     }
 
-    auto write(OpenInfo& info, const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> override {
-        auto file_r = data_as<File>(info.get_driver_data());
+    auto write(FileOperator& fop, const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> override {
+        auto file_r = data_as<File>(fop.get_driver_data());
         if(!file_r) {
             return file_r.as_error();
         }
@@ -199,19 +199,19 @@ class Driver : public fs::Driver {
         return file->write(offset, size, static_cast<const uint8_t*>(buffer));
     }
 
-    auto find(OpenInfo& info, const std::string_view name) -> Result<OpenInfo> override {
-        auto dir_r = data_as<Directory>(info.get_driver_data());
+    auto find(FileOperator& fop, const std::string_view name) -> Result<FileOperator> override {
+        auto dir_r = data_as<Directory>(fop.get_driver_data());
         if(!dir_r) {
             return dir_r.as_error();
         }
         auto& dir = dir_r.as_value();
 
         const auto p = dir->find(name);
-        return p != nullptr ? Result(create_openinfo(*p)) : Error::Code::NoSuchFile;
+        return p != nullptr ? Result(create_file_operator(*p)) : Error::Code::NoSuchFile;
     }
 
-    auto create(OpenInfo& info, const std::string_view name, const FileType type) -> Result<OpenInfo> override {
-        auto dir_r = data_as<Directory>(info.get_driver_data());
+    auto create(FileOperator& fop, const std::string_view name, const FileType type) -> Result<FileOperator> override {
+        auto dir_r = data_as<Directory>(fop.get_driver_data());
         if(!dir_r) {
             return dir_r.as_error();
         }
@@ -232,11 +232,11 @@ class Driver : public fs::Driver {
         default:
             return Error::Code::NotImplemented;
         }
-        return create_openinfo(*v);
+        return create_file_operator(*v);
     }
 
-    auto readdir(OpenInfo& info, const size_t index) -> Result<OpenInfo> override {
-        auto dir_r = data_as<Directory>(info.get_driver_data());
+    auto readdir(FileOperator& fop, const size_t index) -> Result<FileOperator> override {
+        auto dir_r = data_as<Directory>(fop.get_driver_data());
         if(!dir_r) {
             return dir_r.as_error();
         }
@@ -248,11 +248,11 @@ class Driver : public fs::Driver {
         }
         auto& child = child_r.as_value();
 
-        return create_openinfo(*child);
+        return create_file_operator(*child);
     }
 
-    auto remove(OpenInfo& info, const std::string_view name) -> Error override {
-        auto dir_r = data_as<Directory>(info.get_driver_data());
+    auto remove(FileOperator& fop, const std::string_view name) -> Error override {
+        auto dir_r = data_as<Directory>(fop.get_driver_data());
         if(!dir_r) {
             return dir_r.as_error();
         }
@@ -264,11 +264,11 @@ class Driver : public fs::Driver {
         return Success();
     }
 
-    auto get_root() -> OpenInfo& override {
+    auto get_root() -> FileOperator& override {
         return root;
     }
 
     Driver() : data(Directory("/")),
-               root("/", *this, &data, FileType::Directory, 0, OpenInfo::volume_root_attributes) {}
+               root("/", *this, &data, FileType::Directory, 0, FileOperator::volume_root_attributes) {}
 };
 } // namespace fs::tmp

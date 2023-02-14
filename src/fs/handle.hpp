@@ -11,23 +11,23 @@ constexpr auto open_ro = OpenMode{.read = true, .write = false};
 constexpr auto open_wo = OpenMode{.read = false, .write = true};
 constexpr auto open_rw = OpenMode{.read = true, .write = true};
 
-inline auto follow_mountpoints(fs::OpenInfo* info) -> fs::OpenInfo* {
+inline auto follow_mountpoints(fs::FileOperator* fop) -> fs::FileOperator* {
     while(true) {
-        const auto mount = info->mount;
+        const auto mount = fop->mount;
         if(mount != nullptr) {
-            info = mount;
+            fop = mount;
         } else {
             break;
         }
     }
-    return info;
+    return fop;
 }
 
-inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
-    auto [lock, counts] = info->critical_counts.access();
+inline auto try_open(fs::FileOperator* const fop, const OpenMode mode) -> Error {
+    auto [lock, counts] = fop->critical_counts.access();
 
     if(mode.read) {
-        switch(info->attributes.read_level) {
+        switch(fop->attributes.read_level) {
         case OpenLevel::Block:
             return Error::Code::InvalidOpenMode;
         case OpenLevel::Single:
@@ -36,14 +36,14 @@ inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
             }
             [[fallthrough]];
         case OpenLevel::Multi:
-            if(info->attributes.exclusive && counts.write_count != 0) {
+            if(fop->attributes.exclusive && counts.write_count != 0) {
                 return Error::Code::FileOpened;
             }
             break;
         }
     }
     if(mode.write) {
-        switch(info->attributes.write_level) {
+        switch(fop->attributes.write_level) {
         case OpenLevel::Block:
             return Error::Code::InvalidOpenMode;
         case OpenLevel::Single:
@@ -52,7 +52,7 @@ inline auto try_open(fs::OpenInfo* const info, const OpenMode mode) -> Error {
             }
             [[fallthrough]];
         case OpenLevel::Multi:
-            if(info->attributes.exclusive && counts.read_count != 0) {
+            if(fop->attributes.exclusive && counts.read_count != 0) {
                 return Error::Code::FileOpened;
             }
             break;
@@ -73,7 +73,7 @@ class Handle {
     friend class Manager;
 
   private:
-    OpenInfo*              data;
+    FileOperator*          data;
     OpenMode               mode;
     std::unique_ptr<Event> write_event; // data available
     std::atomic_bool       expired = true;
@@ -100,8 +100,8 @@ class Handle {
             return Error::Code::FileNotOpened;
         }
 
-        auto created_info = std::optional<OpenInfo>();
-        auto result       = (OpenInfo*)(nullptr);
+        auto created_fop = std::optional<FileOperator>();
+        auto result      = (FileOperator*)(nullptr);
         {
             auto [lock, children] = data->critical_children.access();
             if(const auto p = children.find(std::string(name)); p != children.end()) {
@@ -111,7 +111,7 @@ class Handle {
                 if(!find_result) {
                     return find_result.as_error();
                 }
-                result = &created_info.emplace(std::move(find_result.as_value()));
+                result = &created_fop.emplace(std::move(find_result.as_value()));
             }
 
             if(const auto e = try_open(result, open_mode)) {
@@ -119,17 +119,17 @@ class Handle {
             }
         }
 
-        if(created_info) {
+        if(created_fop) {
             auto [lock, children] = data->critical_children.access();
 
-            auto& v = created_info.value();
+            auto& v = created_fop.value();
             result  = &children.emplace(v.name, std::move(v)).first->second;
         }
 
         return Handle(result, open_mode);
     }
 
-    auto find(const std::string_view name) -> Result<OpenInfo> {
+    auto find(const std::string_view name) -> Result<FileOperator> {
         if(!mode.read) {
             return Error::Code::FileNotOpened;
         }
@@ -146,7 +146,7 @@ class Handle {
         return r ? Success() : r.as_error();
     }
 
-    auto readdir(const size_t index) -> Result<OpenInfo> {
+    auto readdir(const size_t index) -> Result<FileOperator> {
         if(!mode.read) {
             return Error::Code::FileNotOpened;
         }
@@ -183,7 +183,7 @@ class Handle {
         return data->get_device_type();
     }
 
-    auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<OpenInfo> {
+    auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<FileOperator> {
         if(!mode.write) {
             return Error::Code::FileNotOpened;
         }
@@ -215,7 +215,7 @@ class Handle {
         *this = std::move(o);
     }
 
-    Handle(OpenInfo* const data, const OpenMode mode) : data(data), mode(mode), expired(false) {
+    Handle(FileOperator* const data, const OpenMode mode) : data(data), mode(mode), expired(false) {
         write_event.reset(new Event());
         data->on_handle_create(*write_event);
     }

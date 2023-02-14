@@ -47,7 +47,7 @@ class Manager {
     basic::Driver           basic_driver;
     dev::Driver             devfs_driver;
 
-    OpenInfo&                          root;
+    FileOperator&                      root;
     Critical<std::vector<MountRecord>> critical_mount_records;
 
     static auto split_path(const std::string_view path) -> std::vector<std::string_view> {
@@ -75,11 +75,11 @@ class Manager {
     }
 
     auto open_root(const OpenMode mode) -> Result<Handle> {
-        auto info = follow_mountpoints(&root);
-        if(const auto e = try_open(info, mode)) {
+        auto fop = follow_mountpoints(&root);
+        if(const auto e = try_open(fop, mode)) {
             return e;
         }
-        auto handle = Handle(info, mode);
+        auto handle = Handle(fop, mode);
         return handle;
     }
 

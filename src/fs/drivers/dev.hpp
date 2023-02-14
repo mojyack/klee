@@ -266,47 +266,47 @@ class BlockDevice : public Device {
 
 class Driver : public fs::Driver {
   private:
-    OpenInfo root;
+    FileOperator root;
 
     std::unordered_map<std::string, std::unique_ptr<Device>> devices;
 
   public:
-    auto read(OpenInfo& info, size_t offset, size_t size, void* buffer) -> Result<size_t> override {
-        if(info.get_driver_data() == 0) {
+    auto read(FileOperator& fop, size_t offset, size_t size, void* buffer) -> Result<size_t> override {
+        if(fop.get_driver_data() == 0) {
             return Error::Code::NotFile;
         }
 
-        auto& device = *reinterpret_cast<Device*>(info.get_driver_data());
+        auto& device = *reinterpret_cast<Device*>(fop.get_driver_data());
         return device.read(offset, size, buffer);
     }
 
-    auto write(OpenInfo& info, const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> override {
-        if(info.get_driver_data() == 0) {
+    auto write(FileOperator& fop, const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> override {
+        if(fop.get_driver_data() == 0) {
             return Error::Code::NotFile;
         }
 
-        auto& device = *reinterpret_cast<Device*>(info.get_driver_data());
+        auto& device = *reinterpret_cast<Device*>(fop.get_driver_data());
         return device.write(offset, size, buffer);
     }
 
-    auto find(OpenInfo& info, const std::string_view name) -> Result<OpenInfo> override {
-        if(info.get_driver_data() != 0) {
+    auto find(FileOperator& fop, const std::string_view name) -> Result<FileOperator> override {
+        if(fop.get_driver_data() != 0) {
             return Error::Code::InvalidData;
         }
 
         if(const auto p = devices.find(std::string(name)); p != devices.end()) {
-            return OpenInfo(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize());
+            return FileOperator(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize());
         } else {
             return Error::Code::NoSuchFile;
         }
     }
 
-    auto create(OpenInfo& info, const std::string_view name, const FileType type) -> Result<OpenInfo> override {
+    auto create(FileOperator& fop, const std::string_view name, const FileType type) -> Result<FileOperator> override {
         return Error::Code::InvalidData;
     }
 
-    auto readdir(OpenInfo& info, const size_t index) -> Result<OpenInfo> override {
-        if(info.get_driver_data() != 0) {
+    auto readdir(FileOperator& fop, const size_t index) -> Result<FileOperator> override {
+        if(fop.get_driver_data() != 0) {
             return Error::Code::InvalidData;
         }
         if(index >= devices.size()) {
@@ -314,11 +314,11 @@ class Driver : public fs::Driver {
         }
 
         const auto p = std::next(devices.begin(), index);
-        return OpenInfo(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize());
+        return FileOperator(p->first, *this, p->second.get(), FileType::Device, p->second->get_filesize());
     }
 
-    auto remove(OpenInfo& info, const std::string_view name) -> Error override {
-        if(info.get_driver_data() != 0) {
+    auto remove(FileOperator& fop, const std::string_view name) -> Error override {
+        if(fop.get_driver_data() != 0) {
             return Error::Code::InvalidData;
         }
 
@@ -330,13 +330,13 @@ class Driver : public fs::Driver {
         }
     }
 
-    auto get_device_type(OpenInfo& info) -> DeviceType override {
-        auto& device = *reinterpret_cast<Device*>(info.get_driver_data());
+    auto get_device_type(FileOperator& fop) -> DeviceType override {
+        auto& device = *reinterpret_cast<Device*>(fop.get_driver_data());
         return device.get_device_type();
     }
 
-    auto create_device(OpenInfo& info, const std::string_view name, const uintptr_t device_impl) -> Result<OpenInfo> override {
-        if(info.get_driver_data() != 0) {
+    auto create_device(FileOperator& fop, const std::string_view name, const uintptr_t device_impl) -> Result<FileOperator> override {
+        if(fop.get_driver_data() != 0) {
             return Error::Code::InvalidData;
         }
 
@@ -346,15 +346,15 @@ class Driver : public fs::Driver {
 
         auto       device = reinterpret_cast<Device*>(device_impl);
         const auto p      = devices.emplace(name, device).first;
-        return OpenInfo(p->first, *this, p->second.get(), FileType::Device, 0);
+        return FileOperator(p->first, *this, p->second.get(), FileType::Device, 0);
     }
 
-    auto control_device(OpenInfo& info, const DeviceOperation op, void* const arg) -> Error override {
-        if(info.get_driver_data() == 0) {
+    auto control_device(FileOperator& fop, const DeviceOperation op, void* const arg) -> Error override {
+        if(fop.get_driver_data() == 0) {
             return Error::Code::NotFile;
         }
 
-        auto& device = *reinterpret_cast<Device*>(info.get_driver_data());
+        auto& device = *reinterpret_cast<Device*>(fop.get_driver_data());
         switch(device.get_device_type()) {
         case DeviceType::None:
             return Error::Code::InvalidDeviceType;
@@ -400,29 +400,29 @@ class Driver : public fs::Driver {
         return Success();
     }
 
-    auto on_handle_create(OpenInfo& info, Event& write_event) -> void override {
-        if(info.get_driver_data() == 0) {
+    auto on_handle_create(FileOperator& fop, Event& write_event) -> void override {
+        if(fop.get_driver_data() == 0) {
             return;
         }
 
-        auto& device = *reinterpret_cast<Device*>(info.get_driver_data());
+        auto& device = *reinterpret_cast<Device*>(fop.get_driver_data());
         device.on_handle_create(write_event);
     }
 
-    auto on_handle_destroy(OpenInfo& info) -> void override {
-        if(info.get_driver_data() == 0) {
+    auto on_handle_destroy(FileOperator& fop) -> void override {
+        if(fop.get_driver_data() == 0) {
             return;
         }
 
-        auto& device = *reinterpret_cast<Device*>(info.get_driver_data());
+        auto& device = *reinterpret_cast<Device*>(fop.get_driver_data());
         device.on_handle_destroy();
     }
 
-    auto get_root() -> OpenInfo& override {
+    auto get_root() -> FileOperator& override {
         return root;
     }
 
-    Driver() : root("/", *this, nullptr, FileType::Directory, 0, OpenInfo::volume_root_attributes) {}
+    Driver() : root("/", *this, nullptr, FileType::Directory, 0, FileOperator::volume_root_attributes) {}
 };
 
 inline auto new_driver() -> Driver {
