@@ -1,36 +1,37 @@
 #pragma once
 #include "../block/drivers/ahci.hpp"
-#include "../block/drivers/cache.hpp"
-#include "../block/drivers/partition.hpp"
 #include "../block/gpt.hpp"
 #include "drivers/basic.hpp"
-#include "drivers/dev.hpp"
+#include "drivers/dev/driver.hpp"
 #include "drivers/fat/driver.hpp"
 #include "drivers/tmp.hpp"
 #include "handle.hpp"
 
 namespace fs {
 struct SataDevice {
-    block::cache::Device<block::ahci::Device> device;
-    std::vector<block::gpt::Partition>        partitions;
+    block::ahci::Device                                     device;
+    std::vector<std::unique_ptr<dev::PartitionBlockDevice>> partitions;
 };
 
 class Manager {
   private:
     struct MountRecord {
-        std::string                 device;
-        std::string                 mountpoint_path;
-        std::unique_ptr<fs::Driver> fs_driver;
-        Handle                      mountpoint_handle;
-        bool                        shared_driver;
+        std::string                   device;
+        std::string                   mountpoint_path;
+        std::unique_ptr<Driver>       driver;
+        std::unique_ptr<FileOperator> root;
+        Handle                        mountpoint_handle;
+        bool                          shared_driver;
 
         auto operator=(MountRecord&&) -> MountRecord& = default;
 
-        MountRecord(std::string device, std::string mountpoint, Handle handle, fs::Driver* const fs_driver, const bool shared_driver) : device(std::move(device)),
-                                                                                                                                        mountpoint_path(std::move(mountpoint)),
-                                                                                                                                        fs_driver(std::unique_ptr<fs::Driver>(fs_driver)),
-                                                                                                                                        mountpoint_handle(std::move(handle)),
-                                                                                                                                        shared_driver(shared_driver) {}
+        MountRecord(std::string device, std::string mountpoint, Handle mountpoint_handle, Driver* const driver, FileOperator* const root, const bool shared_driver)
+            : device(std::move(device)),
+              mountpoint_path(std::move(mountpoint)),
+              driver(std::unique_ptr<Driver>(driver)),
+              root(std::unique_ptr<FileOperator>(root)),
+              mountpoint_handle(std::move(mountpoint_handle)),
+              shared_driver(shared_driver) {}
 
         MountRecord(MountRecord&& o) {
             *this = std::move(o);
@@ -38,16 +39,19 @@ class Manager {
 
         ~MountRecord() {
             if(shared_driver) {
-                [[maybe_unused]] const auto shared = fs_driver.release();
+                [[maybe_unused]] const auto shared1 = driver.release();
+                [[maybe_unused]] const auto shared2 = root.release();
             }
         }
     };
 
     std::vector<SataDevice> sata_devices;
     basic::Driver           basic_driver;
+    FileOperator            basic_root;
     dev::Driver             devfs_driver;
+    FileOperator            devfs_root;
+    FileOperator&           root;
 
-    FileOperator&                      root;
     Critical<std::vector<MountRecord>> critical_mount_records;
 
     static auto split_path(const std::string_view path) -> std::vector<std::string_view> {
@@ -105,14 +109,14 @@ class Manager {
         return result;
     }
 
-    auto set_mount_driver(const std::string_view path, Driver& driver) -> Result<Handle> {
-        auto volume_root = &driver.get_root();
-        auto handle_r    = open(path, open_rw);
+    auto set_mount_driver(const std::string_view path, FileOperator& root) -> Result<Handle> {
+        auto handle_r = open(path, open_rw);
         if(!handle_r) {
             return handle_r.as_error();
         }
-        auto& handle       = handle_r.as_value();
-        handle.data->mount = volume_root;
+        auto& handle = handle_r.as_value();
+
+        handle.fop->mount = &root;
         return std::move(handle);
     }
 
@@ -123,8 +127,8 @@ class Manager {
         }
         auto& handle = handle_r.as_value();
 
-        auto driver = std::unique_ptr<fat::Driver>(new fat::Driver(std::move(handle)));
-        if(const auto e = driver->init()) {
+        auto driver = std::unique_ptr<fat::Driver>(new fat::Driver());
+        if(const auto e = driver->init(std::move(handle))) {
             return e;
         }
 
@@ -155,12 +159,15 @@ class Manager {
             return;
         }
 
-        auto node = handle.data;
-        node->on_handle_destroy();
-        handle.write_event.reset();
+        auto fop = handle.fop;
+        fop->on_handle_destroy(handle.per_handle);
+        if(const auto e = fop->destroy_per_handle(handle.per_handle)) {
+            logger(LogLevel::Error, "fs: failed to destroy handle data: %d\n", e.as_int());
+            return;
+        }
 
         {
-            auto [lock, counts] = node->critical_counts.access();
+            auto [lock, counts] = fop->critical_counts.access();
             if(handle.mode.read) {
                 counts.read_count -= 1;
             }
@@ -168,63 +175,73 @@ class Manager {
                 counts.write_count -= 1;
             }
         }
-        while(node->parent != nullptr) {
-            if(node->is_busy() || node->attributes.volume_root) {
+        while(fop->parent != nullptr) {
+            if(fop->is_busy() || fop->attributes.volume_root || fop->attributes.keep_on_close) {
                 break;
             }
 
-            const auto parent     = node->parent;
+            const auto parent     = fop->parent;
             auto [lock, children] = parent->critical_children.access();
-            children.erase(node->name);
-            node = parent;
+            children.erase(fop->name);
+            fop = parent;
         }
     }
 
     auto mount(const std::string_view device, const std::string_view mountpoint_path) -> Error {
         auto mountpoint_handle = Handle();
-        auto fs_driver         = (fs::Driver*)nullptr;
+        auto driver            = std::unique_ptr<Driver>();
+        auto root              = std::unique_ptr<FileOperator>();
         auto shared_driver     = false;
 
         if(device == "devfs") {
-            auto handle_r = set_mount_driver(mountpoint_path, devfs_driver);
+            auto handle_r = set_mount_driver(mountpoint_path, devfs_root);
             if(!handle_r) {
                 return handle_r.as_error();
             }
             mountpoint_handle = std::move(handle_r.as_value());
-            fs_driver         = &devfs_driver;
-            shared_driver     = true;
+            driver.reset(&devfs_driver);
+            root.reset(&devfs_root);
+            shared_driver = true;
         } else if(device == "tmpfs") {
-            auto driver   = std::unique_ptr<fs::tmp::Driver>(new fs::tmp::Driver());
-            auto handle_r = set_mount_driver(mountpoint_path, *driver.get());
+            auto tmpfs_driver = std::unique_ptr<Driver>(new tmp::Driver());
+            auto tmpfs_root   = std::unique_ptr<FileOperator>(new FileOperator(*tmpfs_driver, tmpfs_driver->get_root()));
+
+            auto handle_r = set_mount_driver(mountpoint_path, *tmpfs_root.get());
             if(!handle_r) {
                 return handle_r.as_error();
             }
             mountpoint_handle = std::move(handle_r.as_value());
-            fs_driver         = driver.release();
+
+            driver = std::move(tmpfs_driver);
+            root   = std::move(tmpfs_root);
         } else {
             // TODO
             // detect filesystem
             const auto filesystem = block::gpt::Filesystem::FAT32;
             switch(filesystem) {
             case block::gpt::Filesystem::FAT32: {
-                auto driver_r = create_fat_driver(device);
-                if(!driver_r) {
-                    return driver_r.as_error();
+                auto fatfs_driver_r = create_fat_driver(device);
+                if(!fatfs_driver_r) {
+                    return fatfs_driver_r.as_error();
                 }
-                auto& driver = driver_r.as_value();
+                auto& fatfs_driver = fatfs_driver_r.as_value();
 
-                auto handle_r = set_mount_driver(mountpoint_path, *driver.get());
+                auto fatfs_root = std::unique_ptr<FileOperator>(new FileOperator(*fatfs_driver, fatfs_driver->get_root()));
+
+                auto handle_r = set_mount_driver(mountpoint_path, *fatfs_root.get());
                 if(!handle_r) {
                     return handle_r.as_error();
                 }
                 mountpoint_handle = std::move(handle_r.as_value());
-                fs_driver         = driver.release();
+
+                driver = std::move(fatfs_driver);
+                root   = std::move(fatfs_root);
             } break;
             }
         }
 
         auto [lock, mount_records] = critical_mount_records.access();
-        mount_records.emplace_back(std::string(device), normalize_path(mountpoint_path), std::move(mountpoint_handle), fs_driver, shared_driver);
+        mount_records.emplace_back(std::string(device), normalize_path(mountpoint_path), std::move(mountpoint_handle), driver.release(), root.release(), shared_driver);
         return Success();
     }
 
@@ -237,7 +254,7 @@ class Manager {
             }
 
             auto&      mountpoint_handle = i->mountpoint_handle;
-            const auto mountpoint        = mountpoint_handle.data;
+            const auto mountpoint        = mountpoint_handle.fop;
 
             const auto volume_root = mountpoint->mount;
             if(volume_root->is_busy()) {
@@ -267,24 +284,51 @@ class Manager {
         sata_devices = std::move(devices);
         auto buf     = std::array<char, 32>();
         for(auto i = 0; i < sata_devices.size(); i += 1) {
-            auto&      d   = sata_devices[i];
-            const auto len = snprintf(buf.data(), buf.size(), "disk%d", i);
-            if(const auto e = create_device_file({buf.data(), size_t(len)}, &d.device)) {
+            auto&      satadev     = sata_devices[i];
+            const auto len         = snprintf(buf.data(), buf.size(), "disk%d", i);
+            const auto device_name = std::string_view{buf.data(), size_t(len)};
+            if(const auto e = create_device_file(device_name, &satadev.device)) {
                 return e;
             }
-            for(auto j = 0; j < d.partitions.size(); j += 1) {
-                auto&      p   = d.partitions[j];
-                const auto len = snprintf(buf.data(), buf.size(), "disk%dp%d", i, j);
-                if(const auto e = create_device_file({buf.data(), size_t(len)}, p.device.get())) {
-                    return e;
+
+            const auto bytes_per_sector = satadev.device.get_bytes_per_sector();
+            if(bytes_per_sector > memory::bytes_per_frame) {
+                logger(LogLevel::Warn, "fs: block size of device %s is larger than page size and not supported\n", std::string(device_name).data());
+                continue;
+            }
+            const auto blocks_per_page = memory::bytes_per_frame / bytes_per_sector;
+
+            const auto path = std::string("/dev/") + std::string(device_name);
+
+            auto partitions_r = block::gpt::find_partitions(path);
+            if(!partitions_r) {
+                logger(LogLevel::Error, "fs: failed to find partitions: %d", partitions_r.as_error().as_int());
+                continue;
+            }
+            auto& partitions = partitions_r.as_value();
+
+            for(auto j = 0; j < partitions.size(); j += 1) {
+                if(partitions[j].lba_start % blocks_per_page != 0) {
+                    logger(LogLevel::Warn, "fs: partition %d of device %s is not page aligned and not supported\n", j, std::string(device_name).data());
                 }
+                auto partdev = std::unique_ptr<dev::PartitionBlockDevice>(new dev::PartitionBlockDevice(&satadev.device, partitions[j].lba_start, partitions[i].lba_last - partitions[i].lba_start + 1, blocks_per_page));
+
+                const auto len         = snprintf(buf.data(), buf.size(), "disk%dp%d", i, j);
+                const auto device_name = std::string_view{buf.data(), size_t(len)};
+                if(const auto e = create_device_file(device_name, partdev.get())) {
+                    logger(LogLevel::Error, "fs: failed to create partition device file: %d", e.as_int());
+                    continue;
+                }
+
+                satadev.partitions.emplace_back(std::move(partdev));
             }
         }
+
         return Success();
     }
 
     // just a helper
-    auto create_device_file(const std::string_view name, fs::dev::Device* device_impl) -> Error {
+    auto create_device_file(const std::string_view name, dev::Device* device_impl) -> Error {
         auto dev_r = open("/dev", open_rw);
         if(!dev_r) {
             logger(LogLevel::Error, "failed to open \"/dev\": %d\n", dev_r.as_error().as_int());
@@ -297,17 +341,19 @@ class Manager {
         return Success();
     }
 
-    Manager() : root(basic_driver.get_root()) {}
+    Manager() : basic_root(basic_driver, basic_driver.get_root()),
+                devfs_root(devfs_driver, devfs_driver.get_root()),
+                root(basic_root) {}
 };
 
 inline auto manager = (Manager*)(nullptr);
 
-inline auto Handle::close() -> void {
-    manager->close(*this);
+inline auto open(const std::string_view path, const OpenMode mode) -> Result<Handle> {
+    return manager->open(path, mode);
 }
 
-inline fat::BlockDevice::~BlockDevice() {
-    manager->close(handle);
+inline auto close(Handle& handle) -> void {
+    return manager->close(handle);
 }
 
 inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
@@ -318,13 +364,7 @@ inline auto device_finder_main(const uint64_t id, const int64_t data) -> void {
         ahci_controller.wait_identify();
 
         for(auto& dev : ahci_controller.get_devices()) {
-            auto& new_device = sata_devices.emplace_back(SataDevice{block::cache::Device<block::ahci::Device>(dev)});
-            auto  partitions = block::gpt::find_partitions(new_device.device);
-            if(partitions) {
-                for(auto& p : partitions.as_value()) {
-                    new_device.partitions.emplace_back(std::move(p));
-                }
-            }
+            sata_devices.emplace_back(SataDevice{block::ahci::Device(dev)});
         }
 
         // TODO

@@ -34,7 +34,7 @@ class BitmapMemoryManager {
         if(flag) {
             allocation_map[line_index] |= (static_cast<MaplineType>(1) << bit_index);
         } else {
-            allocation_map[line_index] &= (static_cast<MaplineType>(1) << bit_index);
+            allocation_map[line_index] &= ~(static_cast<MaplineType>(1) << bit_index);
         }
     }
 

@@ -1,7 +1,7 @@
 #pragma once
 #include <algorithm>
 
-#include "../fs/drivers/dev.hpp"
+#include "../fs/drivers/dev/fb.hpp"
 #include "../interrupt/vector.hpp"
 #include "../lapic/registers.hpp"
 #include "../log.hpp"
@@ -203,7 +203,7 @@ class Framebuffer : public fs::dev::FramebufferDevice {
 
         *sync_done = 0;
         flip       = !flip;
-        data       = static_cast<uint8_t*>(buffers[flip].get_frame());
+        data       = static_cast<std::byte*>(buffers[flip].get_frame());
         return;
     }
 
@@ -213,10 +213,10 @@ class Framebuffer : public fs::dev::FramebufferDevice {
 
     auto operator=(Framebuffer&&) -> Framebuffer& = delete;
 
-    Framebuffer(const std::array<memory::FrameID, 2> buffers, const std::array<size_t, 2> buffer_size, queue::Queue& control_queue, uint32_t* const sync_done, Event**& sync_done_event) : buffers(buffers),
-                                                                                                                                                                                           control_queue(&control_queue),
-                                                                                                                                                                                           sync_done(sync_done) {
-        data              = static_cast<uint8_t*>(buffers[flip].get_frame());
+    Framebuffer(const std::array<memory::FrameID, 2> buffers, const std::array<size_t, 2> buffer_size, queue::Queue& control_queue, uint32_t* const sync_done, Event*& sync_done_event) : buffers(buffers),
+                                                                                                                                                                                          control_queue(&control_queue),
+                                                                                                                                                                                          sync_done(sync_done) {
+        data              = static_cast<std::byte*>(buffers[flip].get_frame());
         this->buffer_size = buffer_size;
         sync_done_event   = &write_event;
     };
@@ -238,7 +238,7 @@ class GPUDevice {
     std::pair<std::array<memory::SmartFrameID, 2>, uint64_t> framebuffer;
     Worker                                                   worker;
     uint32_t                                                 sync_done       = 1;
-    Event**                                                  sync_done_event = nullptr;
+    Event*                                                   sync_done_event = nullptr;
 
   public:
     auto worker_main() -> Worker::Generator {
@@ -373,8 +373,8 @@ class GPUDevice {
             }
             if(response->flags & internal::ControlHeader::flag_fence) {
                 sync_done = 1;
-                if(sync_done_event != nullptr && *sync_done_event != nullptr) {
-                    (*sync_done_event)->notify();
+                if(sync_done_event != nullptr) {
+                    sync_done_event->notify();
                 }
             }
         }

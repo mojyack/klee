@@ -388,28 +388,23 @@ class Shell {
                 print("failed to get filesize: %d\n", size_r.as_error().as_int());
                 return true;
             }
-            auto           size   = size_r.as_value();
-            auto           offset = 0;
-            constexpr auto chunk  = size_t(64);
-            auto           buffer = std::array<char, chunk>();
-            while(size > 0) {
-                const auto read_size   = std::min(size, chunk);
-                auto       read_result = size_t();
-                if(const auto read = handle.read(offset, read_size, buffer.data()); !read) {
-                    print("read error: %d\n", read.as_error().as_int());
-                    return true;
-                } else {
-                    read_result = read.as_value();
-                }
+            auto size = size_r.as_value();
 
-                for(auto& c : buffer) {
-                    if(c <= 0x00 || c == 0x09) {
-                        c = ' ';
-                    }
+            auto           offset = 0;
+            constexpr auto chunk  = size_t(512);
+            auto           buffer = std::vector<char>(chunk);
+            while(size > 0) {
+                const auto read_size = std::min(size, chunk);
+                const auto read_r    = handle.read(offset, read_size, buffer.data());
+                if(!read_r) {
+                    print("read error: %d\n", read_r.as_error().as_int());
+                    return true;
                 }
+                const auto read = read_r.as_value();
+
                 size -= read_size;
                 offset += read_size;
-                puts({buffer.data(), read_result});
+                puts({buffer.data(), read});
             }
         } else if(argv[0] == "run") {
             if(argv.size() != 2) {
@@ -532,7 +527,7 @@ inline auto shell_main(const uint64_t id, const int64_t data) -> void {
 
 [[noreturn]] inline auto panic(const char* const message, const int code) -> void {
     logger(LogLevel::Error, "terminal: %s: %d\n", code);
-    debug::println("terminal: error");
+    debug::println("terminal: panic ", std::string_view(message), ": ", code);
     while(true) {
         process::manager->sleep_this_thread();
     }
@@ -573,10 +568,11 @@ inline auto terminal_main(const char** const fb_device) -> void {
     }
 
     {
-        auto event_waiter = EventsWaiter(std::array{&refresh, &framebuffer.read_event(), &shell_exit});
-        auto swap_done    = true;
-        auto swap_pending = false;
-        auto exit         = false;
+        auto& fb_event     = *framebuffer.get_write_event().as_value();
+        auto  event_waiter = EventsWaiter(std::array{&refresh, &fb_event, &shell_exit});
+        auto  swap_done    = true;
+        auto  swap_pending = false;
+        auto  exit         = false;
         while(!exit) {
             switch(event_waiter.wait()) {
             case 0: {
@@ -592,7 +588,7 @@ inline auto terminal_main(const char** const fb_device) -> void {
                 }
             } break;
             case 1:
-                framebuffer.read_event().reset();
+                fb_event.reset();
                 if(swap_pending) {
                     swap_pending = false;
                     if(fb_double_buffered) {

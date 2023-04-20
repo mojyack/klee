@@ -1,6 +1,6 @@
 #pragma once
 #include "../../ahci/ahci.hpp"
-#include "../block.hpp"
+#include "../../fs/drivers/dev/block.hpp"
 
 namespace block::ahci {
 class Device : public fs::dev::BlockDevice {
@@ -8,32 +8,26 @@ class Device : public fs::dev::BlockDevice {
     ::ahci::SATADevice* device;
 
   public:
-    auto read_sector(const size_t sector, const size_t count, void* const buffer) -> Error override {
+    auto read(uint64_t& handle_data, const size_t block, const size_t count, void* const buffer) -> Result<size_t> override {
         auto event = Event();
-        if(!device->read(sector, count, static_cast<uint8_t*>(buffer), /*hack*/ count * bytes_per_sector, event)) {
+        if(!device->read(block, count, static_cast<uint8_t*>(buffer), /*hack*/ count * (size_t(1) << get_blocksize_exp()), event)) {
             return Error::Code::IOError;
         }
         event.wait();
-        return Success();
+        return count;
     }
 
-    auto write_sector(size_t sector, size_t count, const void* const buffer) -> Error override {
+    auto write(uint64_t& handle_data, const size_t block, const size_t count, const void* const buffer) -> Result<size_t> override {
         auto event = Event();
-        if(!device->write(sector, count, static_cast<const uint8_t*>(buffer), /*hack*/ count * bytes_per_sector, event)) {
+        if(!device->write(block, count, static_cast<const uint8_t*>(buffer), /*hack*/ count * (size_t(1) << get_blocksize_exp()), event)) {
             return Error::Code::IOError;
         }
         event.wait();
-        return Success();
+        return count;
     }
 
-    auto get_info() const -> DeviceInfo {
-        return {bytes_per_sector, total_sectors};
-    }
-
-    Device(::ahci::SATADevice& device) : device(&device) {
-        const auto info  = device.get_info();
-        bytes_per_sector = info.bytes_per_sector;
-        total_sectors    = info.total_sectors;
-    }
+    Device(::ahci::SATADevice& device)
+        : fs::dev::BlockDevice(device.get_info().bytes_per_sector, device.get_info().total_sectors),
+          device(&device) {}
 };
 } // namespace block::ahci

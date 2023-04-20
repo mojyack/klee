@@ -11,18 +11,6 @@ constexpr auto open_ro = OpenMode{.read = true, .write = false};
 constexpr auto open_wo = OpenMode{.read = false, .write = true};
 constexpr auto open_rw = OpenMode{.read = true, .write = true};
 
-inline auto follow_mountpoints(fs::FileOperator* fop) -> fs::FileOperator* {
-    while(true) {
-        const auto mount = fop->mount;
-        if(mount != nullptr) {
-            fop = mount;
-        } else {
-            break;
-        }
-    }
-    return fop;
-}
-
 inline auto try_open(fs::FileOperator* const fop, const OpenMode mode) -> Error {
     auto [lock, counts] = fop->critical_counts.access();
 
@@ -73,26 +61,26 @@ class Handle {
     friend class Manager;
 
   private:
-    FileOperator*          data;
-    OpenMode               mode;
-    std::unique_ptr<Event> write_event; // data available
-    std::atomic_bool       expired = true;
+    FileOperator*    fop;
+    PerHandle        per_handle;
+    OpenMode         mode;
+    std::atomic_bool expired = true;
 
   public:
-    auto read(const size_t offset, const size_t size, void* const buffer) -> Result<size_t> {
+    auto read(const auto offset, const size_t size, void* const buffer) -> Result<size_t> {
         if(!mode.read) {
             return Error::Code::FileNotOpened;
         }
 
-        return data->read(offset, size, buffer);
+        return fop->read(per_handle, offset, size, buffer);
     }
 
-    auto write(const size_t offset, const size_t size, const void* const buffer) -> Result<size_t> {
+    auto write(const auto offset, const size_t size, const void* const buffer) -> Result<size_t> {
         if(!mode.write) {
             return Error::Code::FileNotOpened;
         }
 
-        return data->write(offset, size, buffer);
+        return fop->write(per_handle, offset, size, buffer);
     }
 
     auto open(const std::string_view name, const OpenMode open_mode) -> Result<Handle> {
@@ -103,16 +91,15 @@ class Handle {
         auto created_fop = std::optional<FileOperator>();
         auto result      = (FileOperator*)(nullptr);
         {
-            auto [lock, children] = data->critical_children.access();
-            if(const auto p = children.find(std::string(name)); p != children.end()) {
-                result = follow_mountpoints(&p->second);
-            } else {
-                auto find_result = data->find(name);
-                if(!find_result) {
-                    return find_result.as_error();
-                }
-                result = &created_fop.emplace(std::move(find_result.as_value()));
+            auto [lock, children] = fop->critical_children.access();
+
+            const auto prepare_r = fop->prepare_fop(children, per_handle, name, created_fop);
+            if(!prepare_r) {
+                return prepare_r.as_error();
             }
+            const auto& prepare = prepare_r.as_value();
+
+            result = prepare;
 
             if(const auto e = try_open(result, open_mode)) {
                 return e;
@@ -120,21 +107,20 @@ class Handle {
         }
 
         if(created_fop) {
-            auto [lock, children] = data->critical_children.access();
-
-            auto& v = created_fop.value();
-            result  = &children.emplace(v.name, std::move(v)).first->second;
+            result = fop->append_child(std::move(*created_fop));
         }
 
         return Handle(result, open_mode);
     }
 
-    auto find(const std::string_view name) -> Result<FileOperator> {
+    auto close() -> void;
+
+    auto find(const std::string_view name) -> Result<FileAbstract> {
         if(!mode.read) {
             return Error::Code::FileNotOpened;
         }
 
-        return data->find(name);
+        return fop->find(per_handle, name);
     }
 
     auto create(const std::string_view name, const FileType type) -> Error {
@@ -142,16 +128,16 @@ class Handle {
             return Error::Code::FileNotOpened;
         }
 
-        const auto r = data->create(name, type);
+        const auto r = fop->create(per_handle, name, type);
         return r ? Success() : r.as_error();
     }
 
-    auto readdir(const size_t index) -> Result<FileOperator> {
+    auto readdir(const size_t index) -> Result<FileAbstract> {
         if(!mode.read) {
             return Error::Code::FileNotOpened;
         }
 
-        return data->readdir(index);
+        return fop->readdir(per_handle, index);
     }
 
     auto remove(const std::string_view name) -> Error {
@@ -159,17 +145,15 @@ class Handle {
             return Error::Code::FileNotOpened;
         }
 
-        return data->remove(name);
+        return fop->remove(per_handle, name);
     }
-
-    auto close() -> void;
 
     auto get_filesize() const -> Result<size_t> {
         if(!mode.read) {
             return Error::Code::FileNotOpened;
         }
 
-        return data->filesize;
+        return fop->filesize;
     }
 
     auto get_device_type() const -> Result<DeviceType> {
@@ -177,34 +161,46 @@ class Handle {
             return Error::Code::FileNotOpened;
         }
 
-        if(data->type != FileType::Device) {
+        if(fop->type != FileType::Device) {
             return DeviceType::None;
         }
-        return data->get_device_type();
+        return fop->get_device_type();
     }
 
-    auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<FileOperator> {
+    auto get_blocksize() const -> size_t {
+        return size_t(1) << fop->blocksize_exp;
+    }
+
+    auto create_device(const std::string_view name, const uintptr_t device_impl) -> Result<FileAbstract> {
         if(!mode.write) {
             return Error::Code::FileNotOpened;
         }
 
-        return data->create_device(name, device_impl);
+        return fop->create_device(per_handle, name, device_impl);
     }
 
     auto control_device(const DeviceOperation op, void* const arg) -> Error {
-        return data->control_device(op, arg);
+        return fop->control_device(per_handle, op, arg);
     }
 
-    auto read_event() -> Event& {
-        return *write_event;
+    auto get_write_event() -> Result<Event*> {
+        const auto event = fop->get_write_event(per_handle);
+        if(event == nullptr) {
+            return Error::Code::NotSupported;
+        }
+        return event;
+    }
+
+    operator bool() const {
+        return !expired;
     }
 
     auto operator=(Handle&& o) -> Handle& {
         close();
-        data = o.data;
-        mode = o.mode;
-        std::swap(write_event, o.write_event);
-        expired = o.expired.exchange(true);
+        fop        = o.fop;
+        per_handle = o.per_handle;
+        mode       = o.mode;
+        expired    = o.expired.exchange(true);
         return *this;
     }
 
@@ -215,13 +211,25 @@ class Handle {
         *this = std::move(o);
     }
 
-    Handle(FileOperator* const data, const OpenMode mode) : data(data), mode(mode), expired(false) {
-        write_event.reset(new Event());
-        data->on_handle_create(*write_event);
+    Handle(FileOperator* const fop, const OpenMode mode) : fop(fop), mode(mode), expired(false) {
+        if(const auto r = fop->create_handle_data(); !r) {
+            logger(LogLevel::Error, "fs: failed to create driver data of %s: %d\n", fop->name.data(), r.as_error().as_int());
+        } else {
+            per_handle.driver_data = r.as_value();
+        }
+        per_handle.cursor = 0;
+        fop->on_handle_create(per_handle);
     }
 
     ~Handle() {
         close();
     }
 };
+
+auto open(const std::string_view path, const OpenMode mode) -> Result<Handle>;
+auto close(Handle& handle) -> void;
+
+inline auto Handle::close() -> void {
+    ::fs::close(*this);
+}
 } // namespace fs

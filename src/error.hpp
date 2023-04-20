@@ -16,6 +16,7 @@ class [[nodiscard]] Error {
         InvalidEndpointNumber,
         TransferRingNotSet,
         AlreadyAllocated,
+        NotSupported,
         NotImplemented,
         InvalidDescriptor,
         BufferTooSmall,
@@ -57,6 +58,7 @@ class [[nodiscard]] Error {
         EndOfFile,
         // FAT
         NotFAT,
+        BrokenFATEntry,
         // devfs
         InvalidDeviceType,
         InvalidDeviceOperation,

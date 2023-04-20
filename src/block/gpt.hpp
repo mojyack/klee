@@ -4,8 +4,8 @@
 #include <memory>
 #include <vector>
 
-#include "../encoding.hpp"
-#include "drivers/partition.hpp"
+#include "../fs/handle.hpp"
+#include "../util/encoding.hpp"
 
 namespace block::gpt {
 struct MBR {
@@ -71,11 +71,8 @@ struct PartitionEntry {
     uint64_t attribute;
     char16_t name[36];
 
-    auto get_u8name() const -> std::array<char, 36> {
-        auto buffer = std::array<char, 36>();
-        auto u8     = u16tou8(name);
-        std::memcpy(buffer.data(), u8.data(), buffer.size());
-        return buffer;
+    auto get_u8name() const -> std::string {
+        return u16tou8(name);
     }
 } __attribute__((packed));
 
@@ -85,49 +82,76 @@ enum class Filesystem {
 };
 
 struct Partition {
-    Filesystem                            filesystem;
-    std::unique_ptr<fs::dev::BlockDevice> device;
+    uint64_t   lba_start;
+    uint64_t   lba_last;
+    Filesystem filesystem;
 };
 
-inline auto find_partitions(fs::dev::BlockDevice& device) -> Result<std::vector<Partition>> {
-    const auto bytes_per_sector = device.get_bytes_per_sector();
-    auto       buffer           = std::vector<uint8_t>(bytes_per_sector);
+inline auto find_partitions(std::string_view path) -> Result<std::vector<Partition>> {
+    logger(LogLevel::Debug, "block: gpt: searching partition at %s\n", std::string(path).data());
+    auto device_r = ::fs::open(path, ::fs::OpenMode{.read = true, .write = false});
+    if(!device_r) {
+        return device_r.as_error();
+    }
+    auto& device = device_r.as_value();
 
-    if(const auto e = device.read_sector(0, 1, buffer.data())) {
+    const auto blocksize = device.get_blocksize();
+    auto       buffer    = std::vector<std::byte>(blocksize);
+    logger(LogLevel::Debug, "  blocksize is %lu\n", blocksize);
+
+    const auto read_block = [&device, &buffer, blocksize](const size_t block) -> Error {
+        if(const auto r = device.read(block * blocksize, blocksize, buffer.data()); !r) {
+            return r.as_error();
+        } else if(r.as_value() != blocksize) {
+            return Error::Code::IOError;
+        }
+        // debug::println("sector dump:");
+        // for(auto r = 0; r < 16; r += 1) {
+        //     debug::println(debug::Number(*std::bit_cast<uint64_t*>(buffer.data() + (r * 32 +  0)), 16, 16), " ",
+        //                    debug::Number(*std::bit_cast<uint64_t*>(buffer.data() + (r * 32 +  8)), 16, 16), " ",
+        //                    debug::Number(*std::bit_cast<uint64_t*>(buffer.data() + (r * 32 + 16)), 16, 16), " ",
+        //                    debug::Number(*std::bit_cast<uint64_t*>(buffer.data() + (r * 32 + 32)), 16, 16), " ");
+        // }
+        return Success();
+    };
+
+    {
+        if(const auto e = read_block(0)) {
+            return e;
+        }
+        const auto& mbr = *std::bit_cast<MBR*>(buffer.data());
+        if(mbr.signature[0] != 0x55 || mbr.signature[1] != 0xAA) {
+            return Error::Code::NotMBR;
+        }
+
+        if(mbr.partition[0].type != 0xEE) {
+            return Error::Code::NotGPT;
+        }
+    }
+    logger(LogLevel::Debug, "  found valid mbr\n");
+
+    if(const auto e = read_block(1)) {
         return e;
     }
-
-    const auto& mbr = *reinterpret_cast<MBR*>(buffer.data());
-    if(mbr.signature[0] != 0x55 || mbr.signature[1] != 0xAA) {
-        return Error::Code::NotMBR;
-    }
-
-    if(mbr.partition[0].type != 0xEE) {
-        return Error::Code::NotGPT;
-    }
-
-    if(const auto e = device.read_sector(1, 1, buffer.data())) {
-        return e;
-    }
-
-    const auto header = *reinterpret_cast<PartitionTableHeader*>(buffer.data());
+    const auto& header = *std::bit_cast<PartitionTableHeader*>(buffer.data());
     if(std::string_view(header.signature, 8) != "EFI PART") {
         return Error::Code::NotGPT;
     }
     if(header.entry_size != 128) {
         return Error::Code::UnsupportedGPT;
     }
+    logger(LogLevel::Debug, "  found valid gpt\n");
 
     auto result = std::vector<Partition>();
     for(auto i = 0, buffer_lba = -1; i < header.num_entries; i += 1) {
-        const auto lba = header.entry_array_lba + sizeof(PartitionEntry) * i / bytes_per_sector;
+        const auto lba = header.entry_array_lba + sizeof(PartitionEntry) * i / blocksize;
         if(buffer_lba != lba) {
             buffer_lba = lba;
-            if(const auto e = device.read_sector(lba, 1, buffer.data())) {
+            if(const auto e = read_block(lba)) {
                 return e;
             }
         }
-        const auto& entry = *reinterpret_cast<PartitionEntry*>(buffer.data() + sizeof(PartitionEntry) * i % bytes_per_sector);
+        const auto& entry = *std::bit_cast<PartitionEntry*>(buffer.data() + sizeof(PartitionEntry) * i % blocksize);
         if(entry.type == GUID{0, 0}) {
             continue;
         }
@@ -135,8 +159,9 @@ inline auto find_partitions(fs::dev::BlockDevice& device) -> Result<std::vector<
         if(entry.type == partition_type::esp) {
             fs = Filesystem::FAT32;
         }
-        auto dev = new block::partition::PartitionBlockDevice(device, entry.lba_start, entry.lba_last - entry.lba_start + 1);
-        result.emplace_back(Partition{fs, std::unique_ptr<block::partition::PartitionBlockDevice>(dev)});
+
+        logger(LogLevel::Debug, "  partition %d LBA %lu~%lu\n", i, entry.lba_start, entry.lba_last);
+        result.emplace_back(Partition{entry.lba_start, entry.lba_last, fs});
     }
     return result;
 }

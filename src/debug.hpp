@@ -118,7 +118,7 @@ inline auto print(const char c) -> void {
 
 inline auto print(const std::string_view str) -> void {
     const auto font_size = get_font_size();
-    draw_string(Point(cursor[0], cursor[1]), str.data());
+    draw_string(Point(cursor[0], cursor[1]), str);
     cursor[0] += font_size[0] * str.size();
 }
 

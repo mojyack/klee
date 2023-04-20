@@ -81,6 +81,10 @@ class SharedValue {
     SharedValue() {
     }
 
+    SharedValue(SharedValue&& other) : mutex(std::move(other.mutex)),
+                                       data(std::move(other.data)) {
+    }
+
     template <class... Args>
     SharedValue(Args&&... args) : data(std::forward<Args>(args)...) {
     }

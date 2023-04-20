@@ -1,6 +1,6 @@
 #pragma once
+#include "../fs/drivers/dev/keyboard.hpp"
 #include "../message.hpp"
-#include "../fs/drivers/dev.hpp"
 
 namespace devfs {
 class USBKeyboard : public fs::dev::KeyboardDevice {

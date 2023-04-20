@@ -2,6 +2,16 @@
 #include <string>
 
 namespace fs::fat {
+struct BPBSummary {
+    uint16_t bytes_per_sector;
+    uint16_t reserved_sector_count;
+    uint32_t total_sectors_32;
+    uint32_t fat_size_32;
+    uint32_t root_cluster;
+    uint8_t  sectors_per_cluster;
+    uint8_t  num_fats;
+};
+
 struct BPB {
     uint8_t  jump_boot[3];
     char     oem_name[8];
@@ -38,18 +48,16 @@ struct BPB {
     uint8_t  loader[420];
     uint8_t  signature[2];
 
-    struct Summary {
-        uint16_t bytes_per_sector;
-        uint8_t  sectors_per_cluster;
-        uint16_t reserved_sector_count;
-        uint8_t  num_fats;
-        uint32_t total_sectors_32;
-        uint32_t fat_size_32;
-        uint32_t root_cluster;
-    };
-
-    auto summary() const -> Summary {
-        return Summary{bytes_per_sector, sectors_per_cluster, reserved_sector_count, num_fats, total_sectors_32, fat_size_32, root_cluster};
+    auto summary() const -> BPBSummary {
+        return BPBSummary {
+            .bytes_per_sector = bytes_per_sector,
+            .reserved_sector_count = reserved_sector_count,
+            .total_sectors_32 = total_sectors_32,
+            .fat_size_32 = fat_size_32,
+            .root_cluster = root_cluster,
+            .sectors_per_cluster = sectors_per_cluster,
+            .num_fats = num_fats,
+        };
     }
 } __attribute__((packed));
 
@@ -125,10 +133,10 @@ struct LFNEntry {
     uint16_t  first_cluster_low; // 0
     char16_t  name3[2];
 
-    auto to_string() -> std::u16string {
+    auto to_string() const -> std::u16string {
         auto r = std::u16string();
 
-        const auto helper = [&r](const int len, char16_t* const data) -> bool {
+        const auto helper = [&r](const int len, const char16_t* const data) -> bool {
             for(auto i = 0; i < len; i += 1) {
                 if(data[i] != u'\0') {
                     r += data[i];
