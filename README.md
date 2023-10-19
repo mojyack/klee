@@ -1,3 +1,3 @@
 # klee
-n hobby operating system  
+a hobby operating system  
 based on [mikanos](https://github.com/uchan-nos/mikanos) by uchan-nos
